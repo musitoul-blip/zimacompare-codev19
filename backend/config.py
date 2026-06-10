@@ -81,6 +81,7 @@ class ProgressState:
     scan_done:       bool  = False
     target_changed: bool = False
     target_sig: str = ""
+    scan_filter: str = ""
     # NEW v3.4
     source_changed:  bool  = False    # mtime du dossier source a changé pendant le scan
     source_warning:  str   = ""        # détail du warning de modification source

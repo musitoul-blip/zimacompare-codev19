@@ -65,7 +65,7 @@ def _startup():
 
 
 class ScanRequest(BaseModel):
-    source: str; target: str; method: str = "fast"
+    source: str; target: str; method: str = "fast"; filter: Optional[str] = None
 
 class SyncRequest(BaseModel):
     dry_run: bool = True
@@ -183,7 +183,7 @@ def api_scan(req: ScanRequest):
     if rclone.is_rclone_busy():
         raise HTTPException(409, "Une synchro rclone (Cloud) est en cours — "
                                  "attendez sa fin ou arrêtez-la.")
-    if not start_scan(req.source, req.target, req.method, _cfg.chunk_size_mb):
+    if not start_scan(req.source, req.target, req.method, _cfg.chunk_size_mb, name_filter=req.filter or ""):
         raise HTTPException(409, "Une opération est déjà en cours")
     return {"status": "started"}
 
