@@ -82,6 +82,7 @@ class ProgressState:
     target_changed: bool = False
     target_sig: str = ""
     scan_filter: str = ""
+    scan_seq: int = 0
     # NEW v3.4
     source_changed:  bool  = False    # mtime du dossier source a changé pendant le scan
     source_warning:  str   = ""        # détail du warning de modification source
@@ -103,6 +104,8 @@ def get_state() -> dict:
 
 def update_state(**kwargs):
     with _state_lock:
+        if kwargs.get("scan_done") is True and not _state.scan_done:
+            kwargs["scan_seq"] = _state.scan_seq + 1
         for k, v in kwargs.items():
             if hasattr(_state, k):
                 setattr(_state, k, v)

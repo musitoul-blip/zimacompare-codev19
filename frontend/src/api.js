@@ -26,6 +26,7 @@ export const api = {
   cacheStats:    ()       => req('GET',  '/cache-stats'),
   cacheClear:    ()       => req('POST', '/cache-clear'),
   scan:          (body)   => req('POST', '/scan',   body),
+  scanDirs:      (p)      => req('GET',  '/scan/dirs?' + new URLSearchParams(p)),
   sync:          (body)   => req('POST', '/sync',   body),
   abort:         ()       => req('POST', '/abort'),
   reset:         ()       => req('POST', '/reset'),

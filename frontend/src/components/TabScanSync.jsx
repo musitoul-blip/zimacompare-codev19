@@ -208,6 +208,11 @@ export default function TabScanSync({ status }) {
   const [target,   setTarget]   = useState('')
   const [method,   setMethod]   = useState('fast')
   const [dryRun,   setDryRun]   = useState(true)
+  const [filterOn,   setFilterOn]   = useState(false)
+  const [filterText, setFilterText] = useState("")
+  const [resultsNonce, setResultsNonce] = useState(0)
+  const [hideResults, setHideResults] = useState(false)
+  const [preview, setPreview] = useState(null)
   const [busy,     setBusy]     = useState(false)
   const [msg,      setMsg]      = useState(null)
   const [view,     setView]     = useState('stats')
@@ -238,9 +243,19 @@ export default function TabScanSync({ status }) {
   useEffect(() => {
     if (prevState.current && prevState.current !== 'IDLE' && status?.app_state === 'IDLE') {
       api.pathsHistory().then(setHistory).catch(() => {})
+      setResultsNonce(x => x + 1)
     }
     prevState.current = status?.app_state
   }, [status?.app_state])
+
+  useEffect(() => {
+    if (!filterOn || !filterText.trim() || !source) { setPreview(null); setHideResults(false); return }
+    setHideResults(true)
+    const t = setTimeout(() => {
+      api.scanDirs({ source, filter: filterText.trim() }).then(setPreview).catch(() => setPreview(null))
+    }, 400)
+    return () => clearTimeout(t)
+  }, [filterOn, filterText, source])
 
   const isActive = status && !['IDLE','ERROR'].includes(status.app_state)
   const hasDiff  = status && (status.new_count || status.different_count || status.deleted_count)
@@ -250,7 +265,10 @@ export default function TabScanSync({ status }) {
 
   async function doScan() {
     if (!source || !target) return notify('Choisissez source et cible', false)
-    try { setBusy(true); await api.scan({ source, target, method }); notify('Scan démarré') }
+    if (filterOn && filterText.trim()) {
+      try { const r = await api.scanDirs({ source, filter: filterText.trim() }); if (!r || !r.count) { setHideResults(true); return notify("Aucun dossier ne correspond au filtre : " + filterText.trim(), false) } } catch(e) {}
+    }
+    try { setBusy(true); setHideResults(false); await api.scan({ source, target, method, filter: filterOn ? filterText : "" }); notify('Scan démarré') }
     catch(e) { notify(e.message, false) } finally { setBusy(false) }
   }
 
@@ -427,6 +445,31 @@ export default function TabScanSync({ status }) {
           <CacheInfo />
         </div>
         <div style={{ display:'flex', gap:10, alignItems:'center', flexWrap:'wrap' }}>
+          <div style={{ display:"flex", gap:10, alignItems:"center", flexWrap:"wrap", marginBottom:12, flexBasis:"100%" }}>
+            <label style={{ display:"flex", alignItems:"center", gap:6, fontSize:13, cursor:"pointer" }}>
+              <input type="checkbox" checked={filterOn} onChange={e => setFilterOn(e.target.checked)} style={{ accentColor:"var(--accent)" }} />
+              🔎 Filtrer par nom de dossier
+            </label>
+            <input type="text" value={filterText} onChange={e => setFilterText(e.target.value)} placeholder="ex : willy" disabled={!filterOn} style={{ flex:1, minWidth:160, padding:"6px 10px", background:"var(--bg)", border:"1px solid var(--border)", borderRadius:6, color:"var(--text)", opacity: filterOn ? 1 : 0.5 }} />
+          </div>
+          {filterOn && filterText.trim() && preview && (
+            <div style={{ marginBottom:12, fontSize:13, flexBasis:"100%" }}>
+              {preview.count === 0 ? (
+                <div style={{ color:"var(--danger)", padding:"8px 12px", background:"var(--bg)", borderRadius:6, border:"1px solid var(--danger)" }}>Aucun dossier ne correspond au filtre : {filterText.trim()}</div>
+              ) : (
+                <div>
+                  <div style={{ color:"var(--success)", marginBottom:6 }}>🔎 Périmètre : {preview.count} dossier(s) / {preview.total_files} fichier(s)</div>
+                  <div style={{ maxHeight:180, overflowY:"auto", border:"1px solid var(--border)", borderRadius:6 }}>
+                    {preview.dirs.map(d => (
+                      <div key={d.name} style={{ display:"flex", justifyContent:"space-between", padding:"4px 10px", borderBottom:"1px solid var(--border)", fontSize:12 }}>
+                        <span>{d.name}</span><span style={{ color:"var(--muted)" }}>{d.total}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
           {!isActive ? (
             <button className="btn-primary" onClick={doScan} disabled={busy || !source || !target}>
               🔍 Lancer le scan
@@ -443,9 +486,9 @@ export default function TabScanSync({ status }) {
         </div>
       </div>
 
-      {status && <ProgressBlock status={status} />}
+      {status && !hideResults && <ProgressBlock status={status} />}
 
-      {scanDone && !isActive && (
+      {scanDone && !isActive && !hideResults && (
         <>
           <div className="card">
             <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center',
@@ -467,8 +510,8 @@ export default function TabScanSync({ status }) {
                 ))}
               </div>
             </div>
-            {view === 'stats'   && <ScanStats status={status} />}
-            {view === 'details' && <ScanResults />}
+            {view === 'stats'   && <ScanStats key={status?.scan_seq} status={status} />}
+            {view === 'details' && <ScanResults key={status?.scan_seq} />}
           </div>
 
           <div className="card">
