@@ -53,12 +53,12 @@ export default function TabZimatag({ status }) {
       if (sel <= 0) continue
       matched.push({ name: d.name, mp3: d.mp3, flac: d.flac, m4a: d.m4a, sel })
     }
-    matched.sort((a, b) => b.sel - a.sel)
+    matched.sort((a, b) => a.name.localeCompare(b.name))
   }
   const sum = { mp3: 0, flac: 0, m4a: 0, sel: 0 }
   for (const d of matched) { sum.mp3 += d.mp3; sum.flac += d.flac; sum.m4a += d.m4a; sum.sel += d.sel }
   const noMatch = !!(dirs && !idxLoading && selFmts.length && matched.length === 0)
-  const canScan = selFmts.length > 0 && !noMatch && !busy && !isTagScan
+  const canScan = selFmts.length > 0 && !noMatch && !busy && !isTagScan && !(limit.length > 0 && parseInt(limit, 10) <= 0)
 
   function finalizeAfterLaunch() {
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }

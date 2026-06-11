@@ -65,7 +65,7 @@ export default function App() {
         background: 'var(--surface)', borderBottom: '1px solid var(--border)',
         padding: '0 24px', display:'flex', alignItems:'center', gap:16, height:52
       }}>
-        <span style={{ fontSize:20 }}>🔄</span>
+        <img src="/icon.png" alt="" style={{ height:24, width:24, borderRadius:5 }} />
         <span style={{ fontWeight:700, fontSize:16, letterSpacing:'.02em' }}>ZimaCompare&Tag</span>
         <span style={{ color:'var(--muted)', fontSize:12 }}>v9</span>
         <div style={{ flex:1 }} />
