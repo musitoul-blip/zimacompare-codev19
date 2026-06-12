@@ -348,7 +348,7 @@ def export_to_html():
             f"<div class='zpathline'><span class='zpath'>{_html.escape(r['win'])}</span>"
             f"<button class='zbtn zmini' onclick=\"ztCopy(this,'{winj}')\">copier</button>"
             f"<a class='zlink' href=\"{_html.escape(r['uri'])}\">ouvrir</a>"
-            f"<a class='zlink zezcd' href=\"{_html.escape(r['ezcd'])}\" title='ouvrir ce dossier dans EZ CD Audio Converter'>EZ CD</a></div></div>"
+            f"<a class='zlink zezcd' href=\"{_html.escape(r['ezcd'])}\" title='ouvrir ce dossier dans Mp3tag'>Mp3tag</a></div></div>"
             f"<div class='zrow-n zmut'>{r['n']} fichiers</div></div>"
         )
     p.append("</div></div>")
