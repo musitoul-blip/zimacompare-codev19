@@ -756,7 +756,9 @@ def _file_inventory(directory: Path, max_entries: int = 200) -> dict:
     count = 0
     try:
         for root, dirs, files in os.walk(directory):
-            for fname in files:
+            dirs[:] = sorted(d for d in dirs if d != "__pycache__")
+            for fname in sorted(files):
+                if fname.endswith(".pyc"): continue
                 if count >= max_entries: return out
                 p = Path(root) / fname
                 try:
@@ -784,7 +786,7 @@ def api_export_context():
                               "dev":  data.get("devDependencies", {}),
                               "version": data.get("version", "?")}
         except Exception: pass
-    backend_inventory = _file_inventory(Path("/app"), max_entries=50)
+    backend_inventory = _file_inventory(Path("/app"), max_entries=5000)
     history = load_paths_history()
     data_files = {}
     if APP_DATA_ROOT.exists():
@@ -835,8 +837,9 @@ def api_export_context():
         "recent_logs":   recent_logs,
         "smart":         smart_summary,
         "notes_for_assistant": (
-            "État complet d'une instance ZimaCompare. Pour reprendre la conversation, "
-            "demander à l'utilisateur le ZIP installer le plus récent (référencé dans 'installers')."
+            "État complet d'une instance ZimaCompare&Tag. Pour reprendre une session de dev : "
+            "cloner le dépôt git (codevN, voir 'git') et redéployer via compose-install.yml ; "
+            "joindre les mémos (handoff + backlog) et cet export. 'installers' est vide : plus de ZIP installer."
         ),
     }
 
