@@ -10,5 +10,5 @@ pathspec==1.1.1
 python-multipart==0.0.32
 pandas==3.0.3
 numpy==2.5.0
-mutagen==1.48.0
+mutagen==1.48.1
 Pillow==12.2.0
