@@ -106,7 +106,7 @@ _SEED_WEIGHTS = {
     "genre_inconsistency": 0.8, "albumartist_consistency": 1.2,
     "missing_genre_albums": 1.0, "missing_year_albums": 1.0,
     "case_inconsistency_artist": 0.5,
-    "case_inconsistency_genre": 0.5, "cover_non_uniform": 0.3, "multiple_covers": 0.3,
+    "case_inconsistency_genre": 0.5, "cover_non_uniform": 0.3,  # multiple_covers harmonise INFO (retire)
     "mojibake": 0.8,
     # NB T10 Lot A : case_inconsistency_album mis a 0.0 (absent ici = 0.0 par defaut).
     # poids 0 explicites (Lot A + autres) : non listes = 0.0 par defaut
@@ -128,6 +128,7 @@ _SEED_INFO = {
     "folder_artist_mismatch", "album_name_consistency", "bitrate_anomalies",
     "case_inconsistency_album",
     "covers_bluesound_oversized",  # T10 Lot F: correction probleme -> INFO
+    "multiple_covers",  # rattache T10: harmonise INFO comme F17/F21/F22 (filet 0 cas)
 }
 
 def _classement(key):
