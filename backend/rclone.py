@@ -595,7 +595,7 @@ def scan_summary_for_fast_sync() -> dict:
 
     out = {
         "available": False, "source": "", "target": "", "method": "",
-        "to_sync_count": 0, "new_count": 0, "different_count": 0,
+        "to_sync_count": 0, "new_count": 0, "different_count": 0, "deleted_count": 0,
         "scan_age_hours": None, "stale": False, "scanned_at": "", "reason": "",
     }
 
@@ -620,7 +620,7 @@ def scan_summary_for_fast_sync() -> dict:
     out["method"] = st.get("method", "")
 
     # Comptage des fichiers new + different (hors dossiers).
-    new = diff = 0
+    new = diff = deleted = 0
     try:
         with open(SCAN_CSV, newline="", encoding="utf-8") as f:
             reader = _csv.DictReader(f, delimiter=";")
@@ -632,12 +632,15 @@ def scan_summary_for_fast_sync() -> dict:
                     new += 1
                 elif status == "different":
                     diff += 1
+                elif status == "deleted":
+                    deleted += 1
     except Exception as e:
         out["reason"] = f"Lecture du scan impossible : {e}"
         return out
 
     out["new_count"] = new
     out["different_count"] = diff
+    out["deleted_count"] = deleted
     out["to_sync_count"] = new + diff
     out["available"] = True
     return out
@@ -727,8 +730,100 @@ def _build_files_from_list(expect_source: str) -> tuple:
     return list_path_rclone, len(rels)
 
 
+def _build_deletes_from_list(expect_source: str) -> list:
+    """Liste des chemins relatifs en statut 'deleted' du dernier scan.
+    Meme garde-fou de concordance source que _build_files_from_list.
+    Retourne [] si aucun (la passe de suppression ne fera alors rien)."""
+    from config import SCAN_CSV, get_state
+    if not SCAN_CSV.exists():
+        return []
+    st = get_state()
+    scan_source = st.get("source", "")
+    if scan_source and expect_source and scan_source != expect_source:
+        raise RcloneError(
+            f"Le dernier scan porte sur une autre source ({scan_source}) "
+            f"que celle demandee ({expect_source})."
+        )
+    rels = []
+    try:
+        with open(SCAN_CSV, newline="", encoding="utf-8") as f:
+            reader = _csv.DictReader(f, delimiter=";")
+            for row in reader:
+                if str(row.get("is_dir", "")).strip().lower() in ("true", "1"):
+                    continue
+                if (row.get("status") or "").strip() == "deleted":
+                    rel = (row.get("relative_path") or "").strip()
+                    if rel:
+                        rels.append(rel.replace("\\", "/"))
+    except Exception as e:
+        raise RcloneError(f"Lecture du scan impossible : {e}")
+    return rels
+
+
+def _split_dest_fs(dest: str) -> tuple:
+    """'pcloud:00_PcloudMusic' -> ('pcloud:', '00_PcloudMusic')."""
+    d = (dest or "").strip()
+    if ":" not in d:
+        return RC_REMOTE, d.lstrip("/")
+    i = d.index(":")
+    return d[:i + 1], d[i + 1:].lstrip("/")
+
+
+def _rc_deletefile(fs: str, remote: str, dry_run: bool) -> bool:
+    """Supprime UN fichier du remote via operations/deletefile.
+    dry_run -> log seulement (pas d'appel). Retourne True si supprime (ou simule)."""
+    if dry_run:
+        logger.info(f"[RCLONE][DELETE] (DRY-RUN) {fs}{remote}")
+        return True
+    try:
+        _rc_call("operations/deletefile", {"fs": fs, "remote": remote})
+        logger.info(f"[RCLONE][DELETE] supprime {fs}{remote}")
+        return True
+    except RcloneError as e:
+        logger.error(f"[RCLONE][DELETE] echec {fs}{remote} : {e}")
+        return False
+
+
+def _orchestrate_deletes_after_copy(dest: str, rels: list, dry_run: bool):
+    """Thread : attend la fin de la copie ; si DONE, supprime cote pCloud les
+    fichiers 'deleted' du scan (liste bornee). Si ERROR/ABORTED -> ne supprime
+    rien (securite : pas de suppression si la copie n'a pas abouti)."""
+    # Attente de fin de copie (rclone_state quitte RUNNING).
+    while True:
+        time.sleep(_POLL_INTERVAL_S)
+        with _state_lock:
+            stt = _state.rclone_state
+        if stt != "RUNNING":
+            break
+        if _stop_event.is_set():
+            logger.warning("[RCLONE][DELETE] arret demande avant la passe de suppression.")
+            return
+    if stt != "DONE":
+        logger.warning(f"[RCLONE][DELETE] copie terminee en '{stt}' (non DONE) "
+                       f"-> suppressions ignorees ({len(rels)} fichier(s) non traite(s)).")
+        return
+    fs, base = _split_dest_fs(dest)
+    prefix = (base + "/") if base else ""
+    done = 0
+    errors = 0
+    logger.info(f"[RCLONE][DELETE] Debut passe de suppression "
+                f"{'(DRY-RUN) ' if dry_run else ''}: {len(rels)} fichier(s) cible(s).")
+    for rel in rels:
+        if _stop_event.is_set():
+            logger.warning(f"[RCLONE][DELETE] interrompu : {done}/{len(rels)} traite(s).")
+            break
+        ok = _rc_deletefile(fs, prefix + rel, dry_run)
+        if ok:
+            done += 1
+        else:
+            errors += 1
+    logger.info(f"[RCLONE][DELETE] Passe terminee : {done} supprime(s), "
+                f"{errors} echec(s){' (DRY-RUN)' if dry_run else ''}.")
+
+
 def start_rclone_fast_sync(source: str, dest: str, *,
-                           dry_run: bool = True) -> dict:
+                           dry_run: bool = True,
+                           mirror_deletes: bool = False) -> dict:
     """Mode rapide : transfère UNIQUEMENT les fichiers new+different du dernier
     scan ZimaCompare, via --files-from. rclone ne re-compare rien.
 
@@ -802,9 +897,26 @@ def start_rclone_fast_sync(source: str, dest: str, *,
     t = threading.Thread(target=_monitor_job, args=(int(job_id),), daemon=True)
     t.start()
 
+    # Passe de suppression (option B) : uniquement si demande ET liste non vide.
+    deletes_count = 0
+    if mirror_deletes:
+        try:
+            _dels = _build_deletes_from_list(source)
+        except RcloneError as e:
+            logger.warning(f"[RCLONE][DELETE] liste suppressions indisponible : {e}")
+            _dels = []
+        deletes_count = len(_dels)
+        if _dels:
+            logger.info(f"[RCLONE][DELETE] {deletes_count} suppression(s) "
+                        f"programmee(s) apres la copie.")
+            dt = threading.Thread(target=_orchestrate_deletes_after_copy,
+                                  args=(dest, _dels, bool(dry_run)), daemon=True)
+            dt.start()
+
     return {"ok": True, "job_id": int(job_id), "operation": "copy",
             "mode": "fast", "dry_run": bool(dry_run),
-            "files_count": n_files, "source": source, "dest": dest}
+            "files_count": n_files, "deletes_count": deletes_count,
+            "source": source, "dest": dest}
 
 
 # ─────────────────────────────────────────────────────────────────────────

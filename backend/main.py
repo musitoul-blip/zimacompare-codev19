@@ -1072,7 +1072,7 @@ def api_rclone_sync_from_scan(req: RcloneFastSyncRequest):
         raise HTTPException(400, f"Source introuvable ou non-dossier : {req.source}")
     try:
         return rclone.start_rclone_fast_sync(
-            req.source, req.dest, dry_run=req.dry_run,
+            req.source, req.dest, dry_run=req.dry_run, mirror_deletes=_cfg.mirror_deletes,
         )
     except rclone.RcloneError as e:
         msg = str(e)
