@@ -69,8 +69,8 @@ export default function TabLogs() {
       <div className="card">
         <div style={{ display:'flex', gap:10, alignItems:'center', flexWrap:'wrap' }}>
           <strong>Logs en direct</strong>
-          <button onClick={() => setPaused(p => !p)}>{paused ? '\u25B6 Reprendre' : '\u23F8 Pause'}</button>
-          <button onClick={() => { bufRef.current = []; setLines([]) }}>\u2715 Vider</button>
+          <button onClick={() => setPaused(p => !p)}>{paused ? '▶ Reprendre' : '⏸ Pause'}</button>
+          <button onClick={() => { bufRef.current = []; setLines([]) }}>✕ Vider</button>
           <select value={minLvl} onChange={e => setMinLvl(e.target.value)}>
             <option value="ALL">Tous niveaux</option>
             <option value="INFO">INFO+</option>
@@ -85,15 +85,15 @@ export default function TabLogs() {
           <span style={{ fontSize:12, color:'#94a3b8' }}>{view.length}/{lines.length}</span>
         </div>
         <div style={{ marginTop:10, display:'flex', gap:10, flexWrap:'wrap' }}>
-          <button onClick={() => dl('md')}>\u2B07 Rapport diagnostic (.md)</button>
-          <button onClick={() => dl('json')}>\u2B07 Rapport (.json)</button>
-          <button onClick={loadHealth}>\u21BB Rafraichir sante</button>
+          <button onClick={() => dl('md')}>⬇ Rapport diagnostic (.md)</button>
+          <button onClick={() => dl('json')}>⬇ Rapport (.json)</button>
+          <button onClick={loadHealth}>↻ Rafraichir sante</button>
           {health && (
             <span style={{ fontSize:13 }}>
               Sante : <b style={{ color: HS[health.verdict] || HS.unknown }}>{health.verdict}</b>
               {health.metrics && (
                 <span style={{ color:'#94a3b8' }}>
-                  {' '}\u00B7 CPU {health.metrics.cpu_percent}% \u00B7 RAM {health.metrics.mem_percent}% \u00B7 load/cpu {health.metrics.load_per_cpu}
+                  {' '}· CPU {health.metrics.cpu_percent}% · RAM {health.metrics.mem_percent}% · load/cpu {health.metrics.load_per_cpu}
                 </span>
               )}
             </span>
