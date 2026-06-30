@@ -121,6 +121,8 @@ _SEED_PARDOSSIER = {"bitrate_mixed_album", "id3_version_inconsistency", "albumar
 _SEED_PARAMS = [
     ("bluesound_max_kb", 700.0, "covers_bluesound_oversized",
      "Seuil poids pochette Bluesound", "Ko"),
+    ("bluesound_resize_px", 600.0, "covers_bluesound_oversized",
+     "Cible de redimensionnement pochette Bluesound (Mp3tag)", "px"),
 ]
 _SEED_INFO = {
     "cover_size", "quality_analysis", "albumartist_vs_artist", "duplicates_artist_title",

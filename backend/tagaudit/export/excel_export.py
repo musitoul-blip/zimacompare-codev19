@@ -725,6 +725,10 @@ class ExcelExporter:
           2=pixels : taille maximum
           3=0-100  : qualité (100 = meilleure)
         """
+        # Seuils Bluesound dynamiques (audit_params, fallback constantes)
+        from core import audit_registry as _arz
+        _bs_kb = int(_arz.get_audit_param('bluesound_max_kb', self.BLUESOUND_MAX_SIZE_KB))
+        _bs_px = int(_arz.get_audit_param('bluesound_resize_px', 600))
         base = xlsx_path.with_suffix('')  # Ex: .../ZimaTAG_Audit_20260422_114358
         generated = []  # Liste des corrections effectivement générées
         
@@ -752,11 +756,11 @@ class ExcelExporter:
                 df=df_bluesound,
                 base_path=base,
                 suffix='FixCovers_Bluesound',
-                mta_params={'1': 1, '2': 600, '3': 100},
-                title='Pochettes > Bluesound : poids <= 700 Ko',
+                mta_params={'1': 1, '2': _bs_px, '3': 100},
+                title=f'Pochettes > Bluesound : poids <= {_bs_kb} Ko',
                 description=(
                     f'Redimensionnement de {len(df_bluesound):,} pochette(s) '
-                    f'à 600×600 px maximum, format JPEG, qualité 100. '
+                    f'à {_bs_px}×{_bs_px} px maximum, format JPEG, qualité 100. '
                     f'Cible : streamer Bluesound Node.'
                 ),
             )
