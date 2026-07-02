@@ -39,6 +39,13 @@ export const api = {
   uiPrefSet:           (key, value)  => req('POST', `/ui-prefs/${encodeURIComponent(key)}`, { value }),
   auditParams:         ()            => req('GET',  '/audit-params'),  // T10 Lot I4
   auditParamSet:       (key, value)  => req('POST', `/audit-params/${encodeURIComponent(key)}`, { value }),
+  // ===== BluOS (Lot 5) =====
+  bluosParams:    ()            => req('GET',  '/bluos/params'),
+  bluosParamSet:  (key, value)  => req('POST', `/bluos/params/${encodeURIComponent(key)}`, { value: String(value) }),
+  bluosScan:      (body)        => req('POST', '/bluos/scan', body || {}),
+  bluosAbort:     ()            => req('POST', '/bluos/abort'),
+  bluosStatus:    ()            => req('GET',  '/bluos/status'),
+  bluosResults:   ()            => req('GET',  '/bluos/results'),
   reports:       ()       => req('GET',  '/reports'),
   scanResults:   (p)      => req('GET',  `/scan-results?${new URLSearchParams(p)}`),
   diffReport:    ()       => req('GET',  '/diff-report'),

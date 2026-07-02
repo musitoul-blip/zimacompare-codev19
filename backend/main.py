@@ -325,6 +325,27 @@ def api_audit_params():
     _ar.init_and_seed()
     return _ar.get_all_audit_params()
 
+
+# ===== BluOS (Lot 5) — parametres editables bluos_config =====
+class BluosParamBody(BaseModel):
+    value: str   # bluos_config stocke du TEXT (IP, seuils) -> str
+
+
+@app.get("/api/bluos/params")
+def api_bluos_params():
+    from tagaudit.core import audit_registry as _ar
+    _ar.init_and_seed()
+    return _ar.get_all_bluos_params()
+
+
+@app.post("/api/bluos/params/{param_key}")
+def api_bluos_param_set(param_key: str, body: BluosParamBody):
+    from tagaudit.core import audit_registry as _ar
+    ok = _ar.set_bluos_param(param_key, body.value)
+    if not ok:
+        raise HTTPException(404, f"Parametre BluOS inconnu : {param_key}")
+    return {"status": "ok", "param_key": param_key, "value": body.value}
+
 @app.post("/api/audit-params/{param_key}")
 def api_audit_param_set(param_key: str, body: AuditParamBody):
     from tagaudit.core import audit_registry as _ar

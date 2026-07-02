@@ -12,6 +12,7 @@ import TabVerification from './components/TabVerification.jsx'
 import TabAuditRegistry from './components/TabAuditRegistry.jsx'  // T10 Lot F4
 import TabLogs from './components/TabLogs.jsx'  // A2
 import TabTests from './components/TabTests.jsx'  // A3
+import TabBluos from './components/TabBluos.jsx'  // Lot 5 BluOS
 
 document.title = 'ZimaCompare&Tag v' + __APP_VERSION__
 const STATE_COLOR = {
@@ -93,6 +94,7 @@ export default function App() {
         {[
           { id:'scan',    label:'🔍 Scan & Sync' },
           { id:'zimatag', label:'🏷 ZimaTAG' },
+          { id:'bluos',   label:'📻 BluOS' },
           { id:'auditreg', label:'🛠 Audit ZimaTAG' },
           { id:'cleanup', label:'🧹 Nettoyage .db' },
           { id:'cloud',   label:'☁ Cloud'        },
@@ -117,6 +119,7 @@ export default function App() {
       <main style={{ flex:1, padding:24, maxWidth: tab === 'auditreg' ? 1500 : 1100, width:'100%', margin:'0 auto' }}>  {/* T10 Lot H4 : registre plus large */}
         {tab === 'scan'    && <TabScanSync status={status} />}
         {tab === 'zimatag' && <TabZimatag status={status} />}
+        {tab === 'bluos'   && <TabBluos status={status} />}
         {tab === 'auditreg' && <TabAuditRegistry />}
         {tab === 'cleanup' && <TabCleanup  status={status} />}
         {tab === 'cloud'   && <TabCloud    status={status} />}
