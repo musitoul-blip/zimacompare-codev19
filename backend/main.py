@@ -346,6 +346,30 @@ def api_bluos_param_set(param_key: str, body: BluosParamBody):
         raise HTTPException(404, f"Parametre BluOS inconnu : {param_key}")
     return {"status": "ok", "param_key": param_key, "value": body.value}
 
+
+@app.get("/api/bluos/check-path")
+def api_bluos_check_path(path: str):
+    """Coche verte stricte : le dossier est-il present (comme prefixe) dans
+    master_scan.csv ? Renvoie {in_csv, matched_dirs}."""
+    import csv as _csv, os as _os
+    from bluos_scanner import _master_csv_default
+    p = (path or "").strip()
+    if not p:
+        return {"in_csv": False, "matched_dirs": 0, "csv": ""}
+    csv_path = _master_csv_default()
+    if not _os.path.isfile(csv_path):
+        return {"in_csv": False, "matched_dirs": 0, "csv": csv_path}
+    seen = set()
+    try:
+        with open(csv_path, "r", encoding="utf-8", newline="") as fh:
+            for row in _csv.DictReader(fh, delimiter=";"):
+                d = row.get("directory") or ""
+                if d and d.startswith(p):
+                    seen.add(d)
+    except Exception as e:
+        raise HTTPException(500, f"Lecture master_scan.csv: {e}")
+    return {"in_csv": len(seen) > 0, "matched_dirs": len(seen), "csv": csv_path}
+
 @app.post("/api/audit-params/{param_key}")
 def api_audit_param_set(param_key: str, body: AuditParamBody):
     from tagaudit.core import audit_registry as _ar
