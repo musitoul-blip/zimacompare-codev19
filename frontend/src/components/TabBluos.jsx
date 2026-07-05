@@ -147,6 +147,23 @@ export default function TabBluos({ status }) {
     }, 1500)
   }
 
+  // Resync au (re)montage : si un scan tourne cote backend, reprendre le suivi ;
+  // sinon, recharger d'eventuels resultats deja produits (retour d'onglet).
+  useEffect(() => {
+    let alive = true
+    ;(async () => {
+      try {
+        const st = await api.bluosStatus()
+        if (!alive) return
+        if (st && st.running) {
+          setScanning(true); setProg(st); startPolling()
+        } else {
+          try { const r = await api.bluosResults(); if (alive && r) setResults(r) } catch (e) { /* pas de resultats */ }
+        }
+      } catch (e) { /* backend indispo : on ignore */ }
+    })()
+    return () => { alive = false }
+  }, [])
   async function startScan() {
     setMsg(''); setResults(null); setProg(null)
     try {
