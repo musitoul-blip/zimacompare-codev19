@@ -176,18 +176,22 @@ class SmartExtractor:
                     info['cover_md5'] = hashlib.md5(cover).hexdigest()
                     info['cover_size'] = len(cover)
                     info['cover_format'] = self._detect_cover_format(cover)
+                    # PIL primaire (dims fiables + validation en UNE ouverture) ;
+                    # parser maison en fallback si PIL echoue/format non gere.
                     w, h = self._detect_cover_dimensions(cover)
-                    info['cover_width'] = w
-                    info['cover_height'] = h
                     try:
                         from io import BytesIO
                         from PIL import Image
-                        Image.open(BytesIO(cover)).verify()
-                        Image.open(BytesIO(cover)).load()
+                        _img = Image.open(BytesIO(cover))
+                        _img.load()
+                        if _img.size and _img.size[0] > 0 and _img.size[1] > 0:
+                            w, h = _img.size
                         info['cover_valid'] = 'Yes'
                     except Exception as ce:
                         info['cover_valid'] = 'No'
                         info['cover_error'] = str(ce)[:200]
+                    info['cover_width'] = w
+                    info['cover_height'] = h
         except Exception as e:
             logger.debug(f"_extract_cover_info({filepath.name}): {e}")
         return info
