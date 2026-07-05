@@ -246,8 +246,8 @@ class BackgroundScanner:
           - Une erreur sur UN chemin n'arrête pas le scan des AUTRES chemins.
         
         Note : pour conserver le comportement existant, on utilise toujours
-        rglob(f"*{ext}"). La déduplication par lower-case et la sensibilité
-        à la casse ne sont PAS modifiées ici (correctifs [3] non sélectionnés).
+        rglob("*") filtre par suffix.lower() : insensible a la casse
+        (les extensions majuscules comme .MP3 sont desormais captees).
         """
         for scan_path in self.scan_paths:
             try:
@@ -259,12 +259,13 @@ class BackgroundScanner:
                 logger.warning(f"Chemin inaccessible {scan_path}: {e}")
                 continue
             
-            for ext in self.formats:
-                # On itère manuellement plutôt que `yield from rglob()` pour
-                # pouvoir attraper les exceptions du générateur Path.rglob,
-                # qui peut lever PermissionError au milieu de l'itération
-                # quand il rentre dans un sous-dossier interdit.
-                yield from self._safe_rglob(scan_path, f"*{ext}")
+            # Un SEUL parcours rglob("*"), filtre sur suffix.lower() :
+            # insensible a la casse (rglob unique) -> capte .mp3 comme .MP3.
+            # _safe_rglob conserve la tolerance PermissionError/OSError.
+            exts_lower = {e.lower() for e in self.formats}
+            for entry in self._safe_rglob(scan_path, "*"):
+                if entry.suffix.lower() in exts_lower:
+                    yield entry
     
     def _safe_rglob(self, root: Path, pattern: str) -> Generator[Path, None, None]:
         """Variante tolérante de Path.rglob qui ne plante pas sur un
