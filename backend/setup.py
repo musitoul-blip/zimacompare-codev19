@@ -1,4 +1,4 @@
-"""ZimaCompare v7 (AIO) — Module setup wizard.
+"""ZimaCompare v18 (AIO) — Module setup wizard.
 
 Refonte pour l'image AIO supervisée par S6-Overlay :
 - rclone tourne DANS le même conteneur et monte pCloud sur /network/pCloud.
@@ -187,7 +187,7 @@ def finalize_setup():
 def finalize_setup_stream():
     """
     Version SSE de finalize - stream les etapes en temps reel.
-    Etapes v7 : rclone_conf (check) -> pcloud_wait -> done.
+    Etapes v18 : rclone_conf (check) -> pcloud_wait -> done.
     (Plus d'etapes mountpoint / rclone_restart : supprimees en AIO.)
     """
     def generate():

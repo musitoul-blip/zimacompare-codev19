@@ -1,5 +1,5 @@
 /**
- * SetupWizard.jsx — Wizard de première installation ZimaCompare v7
+ * SetupWizard.jsx — Wizard de première installation ZimaCompare v18
  *
  * Affiché à la place de l'app normale si status.setup_needed === true.
  * 3 étapes :
@@ -256,7 +256,7 @@ function StepRclone({ onSuccess }) {
           />
           <p style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '8px' }}>
             Le fichier est accessible via SMB sur ta Zima dans{' '}
-            <code>/DATA/AppData/zimacompare-v7/rclone/rclone.conf</code>
+            <code>/DATA/AppData/zimacompare-v18/rclone/rclone.conf</code>
           </p>
         </div>
       ) : (
@@ -266,7 +266,7 @@ function StepRclone({ onSuccess }) {
             style={styles.input}
             value={path}
             onChange={e => setPath(e.target.value)}
-            placeholder="/DATA/AppData/zimacompare-v7/rclone/rclone.conf"
+            placeholder="/DATA/AppData/zimacompare-v18/rclone/rclone.conf"
           />
           <p style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '8px' }}>
             Le chemin doit être accessible depuis le conteneur.
@@ -292,7 +292,7 @@ function StepRclone({ onSuccess }) {
 // ---------------------------------------------------------------------------
 // Étape 2 — Finalisation
 // ---------------------------------------------------------------------------
-// v7 (AIO) : les étapes correspondent aux identifiants émis par
+// v18 (AIO) : les étapes correspondent aux identifiants émis par
 // /api/setup/finalize/stream — plus de 'mountpoint' ni 'rclone_restart'
 // (S6 monte rclone tout seul dès que rclone.conf est déposé).
 const FINALIZE_STEPS = [
@@ -415,7 +415,7 @@ export default function SetupWizard({ onComplete }) {
           <span style={{ fontSize: '28px' }}>🔄</span>
           <div>
             <div style={{ fontWeight: 700, fontSize: '18px', color: 'var(--text)' }}>
-              ZimaCompare v7
+              ZimaCompare v18
             </div>
             <div style={{ fontSize: '12px', color: 'var(--muted)' }}>
               Configuration initiale

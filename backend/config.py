@@ -1,4 +1,4 @@
-"""ZimaCompare v3.4 — Configuration, état global, logging, historique.
+"""ZimaCompare v18 — Configuration, état global, logging, historique.
 
 Note : /app_data est désormais monté depuis /DATA/AppData/zimacompare-v3/data
 (au lieu de /DATA/AppData/ZimaCompare). Tous les fichiers de l'app sont donc

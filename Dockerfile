@@ -1,5 +1,5 @@
 # =============================================================================
-# ZimaCompare v7 — image AIO (All-In-One)
+# ZimaCompare v18 — image AIO (All-In-One)
 # S6-Overlay (PID 1) supervise : rclone + uvicorn + nginx dans un seul conteneur.
 # Build sur la Zima : DOCKER_BUILDKIT=0 docker build -t ghcr.io/musitoul-blip/zimacompare-aio:v7 .
 #

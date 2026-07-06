@@ -83,7 +83,7 @@ def run_selfcheck():
                 continue
             name = d.get("device", "?")
             poh = d.get("power_on_hours") or 0
-            yrs = poh / 8766.0
+            yrs = poh / 8760.0  # heures/an unifiees (365j, cf smartinfo.py)
             smart_ok = d.get("smart_status")
             tag = "ok"
             if smart_ok is False:
