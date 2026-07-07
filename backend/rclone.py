@@ -1113,3 +1113,79 @@ def inventory_remote(target_path, cap=1_000_000):
     return {"ext_count": ext_count, "ext_bytes": ext_bytes,
             "total_files": total_files, "total_bytes": total_bytes,
             "truncated": truncated}
+
+
+def _iso_to_epoch(s):
+    """'2026-06-29T23:51:37Z' -> epoch float. 0.0 si non parsable."""
+    if not s:
+        return 0.0
+    try:
+        from datetime import datetime, timezone
+        s2 = s.replace("Z", "+00:00")
+        return datetime.fromisoformat(s2).timestamp()
+    except Exception:
+        return 0.0
+
+
+def inventory_remote_entries(target_path, name_filter="", cap=1_000_000, ignore_fn=None):
+    """Collecte cible pCloud via l'API rc au format de _scandir_recursive :
+    dict {rel: (size, mtime_epoch, is_dir)} — remplacement rapide du parcours
+    FUSE (os.scandir/stat) pour un scan ULTRA_FAST (comparaison taille+nom).
+
+    - Fichiers : operations/list recursif filesOnly (Size + ModTime).
+    - Dossiers : operations/list recursif dirsOnly (size 0, is_dir True) pour
+      matcher exactement le format de _scandir_recursive qui inclut les dirs.
+    - name_filter : meme critere que L107 (sous-chaine, insensible casse) sur
+      le premier segment du chemin relatif.
+    Retourne None si non-pCloud ou echec (le caller retombe sur _scandir_recursive).
+    """
+    m = map_mount_to_remote(target_path)
+    if m is None:
+        return None
+    fs, remote = m
+    nf = (name_filter or "").strip().lower()
+    def _first_seg(rel):
+        i = rel.find("/")
+        return rel[:i] if i >= 0 else rel
+    _pref = (remote.rstrip("/") + "/") if remote else ""
+    def _strip_remote_prefix(p):
+        return p[len(_pref):] if _pref and p.startswith(_pref) else p
+    out = {}
+    try:
+        of = _rc_call("operations/list",
+                      {"fs": fs, "remote": remote,
+                       "opt": {"recurse": True, "filesOnly": True}},
+                      timeout=_HTTP_TIMEOUT_HASH)
+        od = _rc_call("operations/list",
+                      {"fs": fs, "remote": remote,
+                       "opt": {"recurse": True, "dirsOnly": True}},
+                      timeout=_HTTP_TIMEOUT_HASH)
+    except RcloneError as e:
+        logger.warning(f"[SCAN] inventory_remote_entries a echoue ({e}) -> fallback FUSE")
+        return None
+    # dossiers d'abord (is_dir True, size 0)
+    for it in (od.get("list") or []):
+        rel = _strip_remote_prefix(it.get("Path") or "") or it.get("Name") or ""
+        if not rel:
+            continue
+        if nf and nf not in _first_seg(rel).lower():
+            continue
+        if ignore_fn is not None and ignore_fn(rel, True):
+            continue
+        out[rel] = (0, _iso_to_epoch(it.get("ModTime")), True)
+    # fichiers
+    for it in (of.get("list") or []):
+        if len(out) >= cap:
+            break
+        rel = _strip_remote_prefix(it.get("Path") or "") or it.get("Name") or ""
+        if not rel:
+            continue
+        if nf and nf not in _first_seg(rel).lower():
+            continue
+        if ignore_fn is not None and ignore_fn(rel, False):
+            continue
+        sz = it.get("Size", 0)
+        if not isinstance(sz, int) or sz < 0:
+            sz = 0
+        out[rel] = (sz, _iso_to_epoch(it.get("ModTime")), False)
+    return out

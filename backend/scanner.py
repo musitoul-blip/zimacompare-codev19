@@ -221,8 +221,26 @@ def _run_scan(source: str, target: str, method: str, chunk_mb: int, name_filter:
         update_state(current_file=f"Collecte cible… (source : {len(src_entries)} entrées)",
                      fps=0, eta_seconds=0,  # débit non pertinent ici
                      ignored_count=src_ignored)
-        tgt_entries, tgt_ignored = _scandir_recursive(
-            tgt, spec, "cible", individual_specs, ignored_sink, _nf, _ef)
+        # ULTRA_FAST sans filtre extension : collecte cible via rclone rc
+        # (operations/list) au lieu du montage FUSE, beaucoup plus rapide.
+        # ignore_fn applique le meme .zimaignore que _scandir_recursive.
+        # Fallback FUSE si non applicable, si rclone echoue, ou renvoie None.
+        tgt_entries = None
+        tgt_ignored = 0
+        if method == "ultra_fast" and not _ef:
+            try:
+                from rclone import inventory_remote_entries
+                _ig = (lambda rel, isd: ignore_match(spec, rel, isd)) if spec else None
+                _rc_entries = inventory_remote_entries(target, name_filter=_nf, ignore_fn=_ig)
+                if _rc_entries is not None:
+                    tgt_entries = _rc_entries
+                    logger.info(f"[SCAN] Cible via rclone rc (ultra_fast) : {len(tgt_entries)} entrees")
+            except Exception as _e:
+                logger.warning(f"[SCAN] collecte rclone cible KO ({_e}) -> fallback FUSE")
+                tgt_entries = None
+        if tgt_entries is None:
+            tgt_entries, tgt_ignored = _scandir_recursive(
+                tgt, spec, "cible", individual_specs, ignored_sink, _nf, _ef)
         if _stop_event.is_set():
             update_state(app_state=AppState.IDLE, current_file="Annulé", progress=0); return
         t2 = time.monotonic()
