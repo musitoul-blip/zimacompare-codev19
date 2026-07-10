@@ -1,8 +1,8 @@
-name: zimacompare-v18
+name: zimacompare-v19
 services:
   zimacompare:
-    container_name: zimacompare-v18
-    image: ghcr.io/musitoul-blip/zimacompare-aio:v18
+    container_name: zimacompare-v19
+    image: ghcr.io/musitoul-blip/zimacompare-aio:v19
     restart: unless-stopped
     cpu_shares: 90
     privileged: true
@@ -11,7 +11,7 @@ services:
     stop_grace_period: 30s
     ports:
       - target: 8516
-        published: "8518"
+        published: "8519"
         protocol: tcp
     environment:
       - TZ=Europe/Paris
@@ -28,10 +28,10 @@ services:
       retries: 3
     volumes:
       - type: bind
-        source: /DATA/AppData/zimacompare-v18/data
+        source: /DATA/AppData/zimacompare-v19/data
         target: /app_data
       - type: bind
-        source: /DATA/AppData/zimacompare-v18/rclone
+        source: /DATA/AppData/zimacompare-v19/rclone
         target: /config/rclone
       - type: bind
         source: /media/HDD-Storage1
@@ -121,12 +121,12 @@ x-casaos:
   tagline:
     en_us: File sync with pCloud — single-container AIO, zero SSH setup
   title:
-    custom: "ZimaCompare&Tag v18"
+    custom: "ZimaCompare&Tag v19"
     en_us: ZimaCompare&Tag v14
   index: /
-  port_map: "8518"
+  port_map: "8519"
   scheme: http
   hostname: ""
   is_uncontrolled: false
-  store_app_id: zimacompare-v18
+  store_app_id: zimacompare-v19
   icon: https://filedn.eu/lXD7ErB2q6Sp19LoIrttSsj/ZimaCompare%26Tag/icon.png

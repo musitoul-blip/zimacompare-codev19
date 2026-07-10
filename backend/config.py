@@ -1,4 +1,4 @@
-"""ZimaCompare v18 — Configuration, état global, logging, historique.
+"""ZimaCompare v19 — Configuration, état global, logging, historique.
 
 Note : /app_data est désormais monté depuis /DATA/AppData/zimacompare-v3/data
 (au lieu de /DATA/AppData/ZimaCompare). Tous les fichiers de l'app sont donc
@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import List
 
 APP_DATA_ROOT      = Path("/app_data")
-APP_VERSION         = "3.18.0"
+APP_VERSION         = "3.19.0"
 CONFIG_FILE        = APP_DATA_ROOT / "config.json"
 STATE_FILE         = APP_DATA_ROOT / "app_state.json"
 SCAN_CSV           = APP_DATA_ROOT / "scan_results.csv"
