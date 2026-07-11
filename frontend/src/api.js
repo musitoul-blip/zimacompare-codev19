@@ -52,6 +52,8 @@ export const api = {
   // ===== Cover (LOT 4) =====
   coverBluosAnalysis: (maxKb)   => req('GET',  `/cover/bluos/analysis${maxKb ? `?max_kb=${maxKb}` : ''}`),
   coverApply:         (body)    => req('POST', '/cover/apply', body),
+  coverBaks:          ()        => req('GET',  '/cover/baks'),
+  coverBaksMove:      ()        => req('POST', '/cover/baks/move'),
   reports:       ()       => req('GET',  '/reports'),
   scanResults:   (p)      => req('GET',  `/scan-results?${new URLSearchParams(p)}`),
   diffReport:    ()       => req('GET',  '/diff-report'),

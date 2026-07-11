@@ -2,6 +2,7 @@ import base64
 import csv
 import io
 import os
+import shutil
 from pathlib import Path
 from typing import Optional
 
@@ -21,6 +22,31 @@ ALLOWED_BROWSE_PREFIXES = [
         "ALLOWED_BROWSE_PREFIXES", "/disks,/network"
     ).split(",") if p.strip()
 ]
+
+# = tagscan.TAG_SOURCE_DEFAULT, dupliqué volontairement pour ne pas coupler
+# cover_routes.py à config.py (voir docstring compressor.py : modules greffés
+# 100% indépendants) — périmètre d'une route destructive, doit rester explicite.
+BAK_SOURCE_ROOT = Path("/disks/HDD-Storage1/Media/GoogleMusic")
+BAK_DEST_ROOT = Path("/disks/HDD-Storage2/00_A_supp")
+
+
+def _find_bak_files():
+    """Liste (Path, size) de tous les *.bak sous BAK_SOURCE_ROOT. Seule source
+    de vérité du périmètre, réutilisée par les 2 routes ci-dessous."""
+    out = []
+    if not BAK_SOURCE_ROOT.exists():
+        return out
+    for dirpath, _dirnames, filenames in os.walk(BAK_SOURCE_ROOT):
+        for fn in filenames:
+            if not fn.endswith(".bak"):
+                continue
+            fp = Path(dirpath) / fn
+            try:
+                out.append((fp, fp.stat().st_size))
+            except OSError:
+                continue
+    out.sort(key=lambda t: str(t[0]))
+    return out
 
 
 def _check_allowed_prefix(path_str: str):
@@ -316,3 +342,47 @@ def cover_full(folder: str = "", path: str = "", which: str = "before", max_px: 
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"conversion jpeg: {e}")
     return Response(content=data, media_type="image/jpeg")
+
+
+@router.get("/baks")
+def cover_list_baks():
+    """Liste les .bak sous BAK_SOURCE_ROOT (toute la bibliotheque). Lecture seule."""
+    files = _find_bak_files()
+    return {
+        "root": str(BAK_SOURCE_ROOT),
+        "total": len(files),
+        "total_size": sum(size for _fp, size in files),
+        "files": [
+            {"path": str(fp), "album": fp.parent.name, "size": size}
+            for fp, size in files
+        ],
+    }
+
+
+@router.post("/baks/move")
+def cover_move_baks():
+    """Deplace tous les .bak de BAK_SOURCE_ROOT vers BAK_DEST_ROOT, en preservant
+    l'arborescence relative (shutil.move : les deux disques sont des filesystems
+    distincts, os.rename echouerait en cross-device). Ne remplace JAMAIS un .bak
+    deja present en destination (skip + signale, jamais d'ecrasement d'archive)."""
+    if not COVER_ALLOW_WRITE:
+        raise HTTPException(403, "Déplacement des .bak désactivé (COVER_ALLOW_WRITE non activé)")
+
+    moved, skipped, errors = [], [], []
+    for fp, _size in _find_bak_files():
+        rel = fp.relative_to(BAK_SOURCE_ROOT)
+        dst = BAK_DEST_ROOT / rel
+        if dst.exists():
+            skipped.append({"path": str(fp), "reason": f"déjà archivé ({dst})"})
+            continue
+        try:
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(fp), str(dst))
+            moved.append({"from": str(fp), "to": str(dst)})
+        except Exception as e:
+            errors.append({"path": str(fp), "error": str(e)})
+
+    return {
+        "moved": len(moved), "skipped": len(skipped), "errors": len(errors),
+        "details_moved": moved, "details_skipped": skipped, "details_errors": errors,
+    }
