@@ -22,7 +22,7 @@ services:
       - RCLONE_RC_URL=http://127.0.0.1:5572
       - COVER_DATA_DIR=/app_data/cover
       - ALLOWED_BROWSE_PREFIXES=/disks,/network
-      - COVER_ALLOW_WRITE=false
+      - COVER_ALLOW_WRITE=true
     healthcheck:
       test: ["CMD-SHELL", "curl -fs http://localhost:8516/api/health > /dev/null || exit 1"]
       interval: 30s
