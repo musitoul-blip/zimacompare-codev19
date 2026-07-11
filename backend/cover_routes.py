@@ -1,11 +1,17 @@
+import base64
+import csv
+import io
 import os
 from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import Response
 from pydantic import BaseModel
+from PIL import Image
 
 import compressor
+from bluos_scanner import bluos_results
 
 router = APIRouter(prefix="/api/cover")
 
@@ -138,3 +144,175 @@ def cover_rows(only_needs: bool = False, limit: int = 2000):
 @router.get("/consistency")
 def cover_consistency():
     return compressor.consistency_report()
+
+
+@router.get("/bluos/analysis")
+def cover_bluos_analysis(max_kb: int = 1000):
+    """Croise la liste BluOS (lecteur) avec master_scan.csv pour indiquer,
+    par album fautif, si la pochette source est corrigeable par ZimaCover."""
+    max_bytes = int(max_kb) * 1024
+    bluos = bluos_results()
+    fautifs = [x for x in bluos.get("network", []) if x.get("status") and x.get("status") != "ok"]
+
+    csv_path = compressor._tagcfg.master_csv_path
+    by_album = {}
+    if csv_path.exists():
+        try:
+            with open(str(csv_path), "r", encoding="utf-8", newline="", errors="replace") as f:
+                sample = f.read(4096); f.seek(0)
+                delim = compressor._sniff_delimiter(sample)
+                rd = csv.DictReader(f, delimiter=delim)
+                lm = {n.lower(): n for n in (rd.fieldnames or [])}
+                c_alb = lm.get("album"); c_fp = lm.get("filepath") or lm.get("path")
+                c_has = lm.get("has_cover"); c_fmt = lm.get("cover_format")
+                c_sz = lm.get("cover_size"); c_w = lm.get("cover_width"); c_h = lm.get("cover_height")
+                for row in rd:
+                    alb = (row.get(c_alb) if c_alb else "") or ""
+                    if not alb or alb in by_album:
+                        continue
+                    has = (row.get(c_has, "") if c_has else "").strip().lower() in ("yes", "true", "1")
+                    if not has:
+                        continue
+                    try:
+                        sz = int(float(row.get(c_sz) or 0))
+                    except Exception:
+                        sz = 0
+                    fp = row.get(c_fp) if c_fp else ""
+                    by_album[alb] = {
+                        "folder": os.path.dirname(fp) if fp else "",
+                        "cover_format": (row.get(c_fmt) if c_fmt else "") or "",
+                        "cover_size": sz,
+                        "cover_width": int(float(row.get(c_w) or 0)) if c_w else 0,
+                        "cover_height": int(float(row.get(c_h) or 0)) if c_h else 0,
+                    }
+        except Exception:
+            pass
+
+    out = []
+    for x in fautifs:
+        title = x.get("title", "") or ""
+        info = by_album.get(title)
+        corrigeable = False
+        raison = "pochette introuvable sur le disque"
+        folder = ""; cf = ""; cs = 0; cw = 0; ch = 0
+        if info:
+            folder = info["folder"]; cf = info["cover_format"]; cs = info["cover_size"]
+            cw = info["cover_width"]; ch = info["cover_height"]
+            fmt_up = (cf or "").upper().replace("IMAGE/", "").strip()
+            if fmt_up and fmt_up not in ("JPEG", "JPG"):
+                corrigeable = True; raison = f"format {cf} (reconvertir en JPEG)"
+            elif cs > max_bytes:
+                corrigeable = True; raison = f"trop lourde ({round(cs/1024)} Ko)"
+            elif cw and cw > 700:
+                corrigeable = True; raison = f"grande ({cw}x{ch}, redimensionner)"
+            else:
+                corrigeable = False; raison = f"pochette {cw}x{ch} {round(cs/1024)} Ko (non corrigeable ici)"
+        out.append({
+            "artist": x.get("artist", ""), "title": title, "status": x.get("status", ""),
+            "corrigeable": corrigeable, "raison": raison, "folder": folder,
+            "cover_format": cf, "cover_size": cs, "cover_width": cw, "cover_height": ch,
+        })
+    nb_corr = sum(1 for o in out if o["corrigeable"])
+    return {"player": bluos.get("player"), "total": len(fautifs),
+            "corrigeables": nb_corr, "albums": out}
+
+
+@router.get("/thumbnail")
+def cover_thumbnail(folder: str = "", path: str = "", max_px: int = 700, max_kb: int = 1000, after: bool = True):
+    """Pochette actuelle (avant) + version compressée simulée (après) en base64. Aucune écriture."""
+    target = None
+    if path:
+        _check_allowed_prefix(path)
+        target = Path(path)
+    elif folder:
+        _check_allowed_prefix(folder)
+        try:
+            for fp in sorted(Path(folder).iterdir()):
+                if fp.suffix.lower() in (".mp3", ".flac", ".m4a"):
+                    target = fp
+                    break
+        except Exception as e:
+            raise HTTPException(status_code=404, detail=f"dossier illisible: {e}")
+    if not target or not target.exists():
+        raise HTTPException(status_code=404, detail="fichier introuvable")
+    ft = compressor.detect_filetype(target)
+    if not ft:
+        raise HTTPException(status_code=415, detail="type non supporté")
+    try:
+        _, pics = compressor.read_tags_and_pictures(target, ft)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"lecture pochette: {e}")
+    if not pics:
+        raise HTTPException(status_code=404, detail="aucune pochette")
+    pic = pics[0]
+
+    def _thumb_b64(raw_bytes, box=220):
+        im = Image.open(io.BytesIO(raw_bytes)); im.load()
+        im = im.convert("RGB")
+        im.thumbnail((box, box), Image.LANCZOS)
+        buf = io.BytesIO(); im.save(buf, format="JPEG", quality=80)
+        return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+
+    out = {"file": str(target), "before": {}, "after": {}}
+    try:
+        out["before"] = {"thumb": _thumb_b64(pic.data), "format": pic.fmt,
+                         "width": pic.width, "height": pic.height, "size": pic.size}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"miniature avant: {e}")
+    if after:
+        try:
+            newpic, q, met = compressor.compress_picture(pic, int(max_kb) * 1024, 40, 95,
+                                                          max_px=int(max_px), allow_downscale=True)
+            out["after"] = {"thumb": _thumb_b64(newpic.data), "format": newpic.fmt,
+                            "width": newpic.width, "height": newpic.height,
+                            "size": newpic.size, "quality": q, "target_met": met}
+        except Exception as e:
+            out["after"] = {"error": str(e)}
+    return out
+
+
+@router.get("/full")
+def cover_full(folder: str = "", path: str = "", which: str = "before", max_px: int = 700, max_kb: int = 1000):
+    """Sert la pochette en binaire (image/jpeg). which=before|after. Aucune écriture."""
+    target = None
+    if path:
+        _check_allowed_prefix(path)
+        target = Path(path)
+    elif folder:
+        _check_allowed_prefix(folder)
+        try:
+            for fp in sorted(Path(folder).iterdir()):
+                if fp.suffix.lower() in (".mp3", ".flac", ".m4a"):
+                    target = fp
+                    break
+        except Exception as e:
+            raise HTTPException(status_code=404, detail=f"dossier illisible: {e}")
+    if not target or not target.exists():
+        raise HTTPException(status_code=404, detail="fichier introuvable")
+    ft = compressor.detect_filetype(target)
+    if not ft:
+        raise HTTPException(status_code=415, detail="type non supporté")
+    try:
+        _, pics = compressor.read_tags_and_pictures(target, ft)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"lecture pochette: {e}")
+    if not pics:
+        raise HTTPException(status_code=404, detail="aucune pochette")
+    pic = pics[0]
+    if which == "after":
+        try:
+            newpic, _q, _m = compressor.compress_picture(pic, int(max_kb) * 1024, 40, 95,
+                                                         max_px=int(max_px), allow_downscale=True)
+            pic = newpic
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"compression: {e}")
+    data = pic.data
+    fmt = (pic.fmt or "").upper()
+    if fmt not in ("JPEG", "JPG"):
+        try:
+            im = Image.open(io.BytesIO(pic.data)); im.load(); im = im.convert("RGB")
+            buf = io.BytesIO(); im.save(buf, format="JPEG", quality=92)
+            data = buf.getvalue()
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"conversion jpeg: {e}")
+    return Response(content=data, media_type="image/jpeg")
