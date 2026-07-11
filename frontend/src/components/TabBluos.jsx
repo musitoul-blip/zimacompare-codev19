@@ -84,6 +84,11 @@ export default function TabBluos({ status }) {
   const [sourcePath, setSourcePath] = useState('')
   const [pathCheck, setPathCheck] = useState(null)  // {in_csv, matched_dirs} ou null
   const [pathChecking, setPathChecking] = useState(false)
+  const [coverAnalysis, setCoverAnalysis] = useState(null)
+  const [coverLoading, setCoverLoading] = useState(false)
+  const [coverErr, setCoverErr] = useState('')
+  const [applyBusy, setApplyBusy] = useState('')   // folder en cours, ou ''
+  const [applyMsg, setApplyMsg] = useState({})     // { [folder]: message }
   const pollRef = useRef(null)
 
   // param IP courant (extrait des params pour le champ dedie)
@@ -180,6 +185,29 @@ export default function TabBluos({ status }) {
     catch (e) { setMsg('✗ ' + e.message) }
   }
 
+  async function analyzeCovers() {
+    setCoverLoading(true); setCoverErr(''); setCoverAnalysis(null)
+    try { setCoverAnalysis(await api.coverBluosAnalysis()) }
+    catch (e) { setCoverErr(e.message) }
+    finally { setCoverLoading(false) }
+  }
+
+  async function applyCorrection(folder) {
+    setApplyBusy(folder)
+    setApplyMsg(m => ({ ...m, [folder]: '' }))
+    try {
+      await api.coverApply({ source: folder })
+      setApplyMsg(m => ({ ...m, [folder]: '✓ lancé' }))
+    } catch (e) {
+      const txt = e.status === 403
+        ? '⏳ Écriture désactivée (activation au LOT 5)'
+        : '✗ ' + e.message
+      setApplyMsg(m => ({ ...m, [folder]: txt }))
+    } finally {
+      setApplyBusy('')
+    }
+  }
+
   const flagged = results?.network ? results.network.filter(r => r.status !== 'ok') : []
 
   return (
@@ -260,6 +288,60 @@ export default function TabBluos({ status }) {
                 ))}
               </tbody>
             </table>
+          )}
+        </div>
+      )}
+
+      {/* --- Corrections pochettes (LOT 4) --- */}
+      {results && flagged.length > 0 && (
+        <div style={card}>
+          <h3 style={{ fontSize: 15, marginTop: 0 }}>Corrections pochettes</h3>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+            <button className="btn-primary" onClick={analyzeCovers} disabled={coverLoading}>
+              {coverLoading ? 'Analyse...' : '🖼 Analyser les corrections pochettes'}
+            </button>
+            {coverErr && <span style={{ color: 'var(--danger)', fontSize: 13 }}>✗ {coverErr}</span>}
+          </div>
+          {coverAnalysis && (
+            <>
+              <div style={{ ...muted, marginBottom: 8 }}>
+                {coverAnalysis.corrigeables} / {coverAnalysis.total} corrigeables
+              </div>
+              <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
+                <thead><tr style={{ textAlign: 'left', color: 'var(--muted)' }}>
+                  <th style={{ padding: 4 }}>Artiste</th><th style={{ padding: 4 }}>Album</th>
+                  <th style={{ padding: 4 }}>Corrigeable</th><th style={{ padding: 4 }}>Raison</th>
+                  <th style={{ padding: 4 }}>Dimensions</th><th style={{ padding: 4 }}></th>
+                </tr></thead>
+                <tbody>
+                  {coverAnalysis.albums.map((a, i) => (
+                    <tr key={i} style={{ borderTop: '1px solid var(--border)' }}>
+                      <td style={{ padding: 4 }}>{a.artist}</td>
+                      <td style={{ padding: 4 }}>{a.title}</td>
+                      <td style={{ padding: 4 }}>
+                        <span style={{ color: a.corrigeable ? 'var(--success)' : 'var(--muted)', fontWeight: 600 }}>
+                          {a.corrigeable ? 'Oui' : 'Non'}
+                        </span>
+                      </td>
+                      <td style={{ padding: 4, ...muted }}>{a.raison}</td>
+                      <td style={{ padding: 4, ...muted }}>
+                        {a.cover_width && a.cover_height ? `${a.cover_width}×${a.cover_height}` : ''}
+                        {a.cover_size ? ` · ${Math.round(a.cover_size / 1024)} Ko` : ''}
+                      </td>
+                      <td style={{ padding: 4 }}>
+                        {a.corrigeable && a.folder && (
+                          <button onClick={() => applyCorrection(a.folder)} disabled={applyBusy === a.folder}
+                                  style={{ fontSize: 12, padding: '2px 8px' }}>
+                            {applyBusy === a.folder ? '...' : 'Corriger'}
+                          </button>
+                        )}
+                        {applyMsg[a.folder] && <span style={{ fontSize: 12, marginLeft: 6 }}>{applyMsg[a.folder]}</span>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
           )}
         </div>
       )}

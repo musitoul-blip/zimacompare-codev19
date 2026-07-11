@@ -8,7 +8,9 @@ async function req(method, path, body) {
   })
   if (!r.ok) {
     const err = await r.json().catch(() => ({ detail: r.statusText }))
-    throw new Error(err.detail || r.statusText)
+    const e = new Error(err.detail || r.statusText)
+    e.status = r.status
+    throw e
   }
   return r.json()
 }
@@ -47,6 +49,9 @@ export const api = {
   bluosStatus:    ()            => req('GET',  '/bluos/status'),
   bluosResults:   ()            => req('GET',  '/bluos/results'),
   bluosCheckPath: (path)        => req('GET',  `/bluos/check-path?path=${encodeURIComponent(path)}`),
+  // ===== Cover (LOT 4) =====
+  coverBluosAnalysis: (maxKb)   => req('GET',  `/cover/bluos/analysis${maxKb ? `?max_kb=${maxKb}` : ''}`),
+  coverApply:         (body)    => req('POST', '/cover/apply', body),
   reports:       ()       => req('GET',  '/reports'),
   scanResults:   (p)      => req('GET',  `/scan-results?${new URLSearchParams(p)}`),
   diffReport:    ()       => req('GET',  '/diff-report'),
