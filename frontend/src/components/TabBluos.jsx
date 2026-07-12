@@ -90,6 +90,9 @@ export default function TabBluos({ status }) {
   const [settings, setSettings] = useState({ maxKb: 1000, maxPx: 700, allowDownscale: false })
   const [albumSettings, setAlbumSettings] = useState({})   // { [title]: {maxKb?,maxPx?,allowDownscale?} }
   const [previewFor, setPreviewFor] = useState(null)        // album en cours d'aperçu, ou null
+  const [afterInfo, setAfterInfo] = useState(null)          // {format,width,height,size} ou null
+  const [afterInfoLoading, setAfterInfoLoading] = useState(false)
+  const [afterInfoErr, setAfterInfoErr] = useState('')
   const [applyBusy, setApplyBusy] = useState('')   // title en cours, ou ''
   const [applyMsg, setApplyMsg] = useState({})     // { [title]: message }
   const [baksOpen, setBaksOpen] = useState(false)
@@ -130,6 +133,20 @@ export default function TabBluos({ status }) {
 
   // cleanup polling au demontage
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current) }, [])
+
+  // Rafraichit les metadonnees "apres" de la modale d'apercu a chaque changement
+  // de reglage (global ou par album), ou d'album affiche.
+  useEffect(() => {
+    if (!previewFor) { setAfterInfo(null); setAfterInfoErr(''); return }
+    const s = effectiveSettings(previewFor.title)
+    let alive = true
+    setAfterInfoLoading(true); setAfterInfoErr('')
+    api.coverPreviewInfo({ path: previewFor.sample_path, maxKb: s.maxKb, maxPx: s.maxPx, allowDownscale: s.allowDownscale })
+      .then(info => { if (alive) setAfterInfo(info) })
+      .catch(e => { if (alive) setAfterInfoErr(e.message) })
+      .finally(() => { if (alive) setAfterInfoLoading(false) })
+    return () => { alive = false }
+  }, [previewFor, settings, albumSettings])
 
   function onParamSaved(k, v) {
     setParams(ps => ps.map(p => p.param_key === k ? { ...p, value: v } : p))
@@ -370,8 +387,11 @@ export default function TabBluos({ status }) {
                 <label style={{ fontSize: 13 }}>
                   <input type="checkbox" checked={settings.allowDownscale}
                          onChange={e => setSettings(s => ({ ...s, allowDownscale: e.target.checked }))} />
-                  {' '}Autoriser la réduction
+                  {' '}Redimensionner si plus grand que la dimension max
                 </label>
+                <span style={{ fontSize: 11, color: 'var(--muted)' }}>
+                  (sans cette case, « Dimension max » est sans effet — seule la compression JPEG s'applique)
+                </span>
               </div>
               <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
                 <thead><tr style={{ textAlign: 'left', color: 'var(--muted)' }}>
@@ -506,7 +526,7 @@ export default function TabBluos({ status }) {
           }} onClick={closePreview}>
             <div style={{
               background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8,
-              padding: 20, width: 760, maxWidth: '90vw', maxHeight: '85vh', overflowY: 'auto',
+              padding: 20, width: 1200, maxWidth: '95vw', maxHeight: '85vh', overflowY: 'auto',
             }} onClick={e => e.stopPropagation()}>
               <h3 style={{ marginTop: 0, fontSize: 15 }}>{previewFor.artist} — {previewFor.title}</h3>
 
@@ -524,23 +544,36 @@ export default function TabBluos({ status }) {
                 <label style={{ fontSize: 13 }}>
                   <input type="checkbox" checked={s.allowDownscale}
                          onChange={e => setAlbumSetting(previewFor.title, { allowDownscale: e.target.checked })} />
-                  {' '}Autoriser la réduction
+                  {' '}Redimensionner si plus grand que la dimension max
                 </label>
+                <span style={{ fontSize: 11, color: 'var(--muted)' }}>
+                  (sans cette case, « Dimension max » est sans effet — seule la compression JPEG s'applique)
+                </span>
                 <button onClick={() => resetAlbumSettings(previewFor.title)} style={{ fontSize: 12 }}>
                   Réinitialiser
                 </button>
               </div>
 
-              <div style={{ display: 'flex', gap: 16 }}>
+              <div style={{ display: 'flex', gap: 24 }}>
                 <div style={{ flex: 1 }}>
                   <div style={muted}>Avant</div>
                   <img src={api.coverFullUrl({ ...common, after: false })}
                        alt="avant" style={{ maxWidth: '100%', borderRadius: 4 }} />
+                  <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>
+                    {previewFor.cover_format || '?'} · {previewFor.cover_width}×{previewFor.cover_height} · {fmtSize(previewFor.cover_size)}
+                  </div>
                 </div>
                 <div style={{ flex: 1 }}>
                   <div style={muted}>Après</div>
                   <img src={api.coverFullUrl({ ...common, after: true })}
                        alt="après" style={{ maxWidth: '100%', borderRadius: 4 }} />
+                  <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>
+                    {afterInfoLoading && '…'}
+                    {afterInfoErr && <span style={{ color: 'var(--danger)' }}>✗ {afterInfoErr}</span>}
+                    {afterInfo && !afterInfoLoading && (
+                      <>{afterInfo.format} · {afterInfo.width}×{afterInfo.height} · {fmtSize(afterInfo.size)}</>
+                    )}
+                  </div>
                 </div>
               </div>
 

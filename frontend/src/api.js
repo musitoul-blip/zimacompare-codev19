@@ -64,6 +64,15 @@ export const api = {
     if (allowDownscale != null) p.set('allow_downscale', allowDownscale ? 'true' : 'false')
     return `/api/cover/full?${p.toString()}`
   },
+  coverPreviewInfo:   ({ path = '', folder = '', maxKb, maxPx, allowDownscale } = {}) => {
+    const p = new URLSearchParams()
+    if (path) p.set('path', path)
+    if (folder) p.set('folder', folder)
+    if (maxKb != null) p.set('max_kb', maxKb)
+    if (maxPx != null) p.set('max_px', maxPx)
+    if (allowDownscale != null) p.set('allow_downscale', allowDownscale ? 'true' : 'false')
+    return req('GET', `/cover/preview-info?${p.toString()}`)
+  },
   reports:       ()       => req('GET',  '/reports'),
   scanResults:   (p)      => req('GET',  `/scan-results?${new URLSearchParams(p)}`),
   diffReport:    ()       => req('GET',  '/diff-report'),

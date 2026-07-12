@@ -357,6 +357,47 @@ def cover_full(folder: str = "", path: str = "", after: bool = False,
     return Response(content=data, media_type="image/jpeg")
 
 
+@router.get("/preview-info")
+def cover_preview_info(folder: str = "", path: str = "", max_px: int = 700,
+                        max_kb: int = 1000, allow_downscale: bool = True):
+    """Métadonnées de la pochette APRÈS compression simulée (format/dimensions/poids),
+    en JSON, sans servir l'image. Aucune écriture."""
+    target = None
+    if path:
+        _check_allowed_prefix(path)
+        target = Path(path)
+    elif folder:
+        _check_allowed_prefix(folder)
+        try:
+            for fp in sorted(Path(folder).iterdir()):
+                if fp.suffix.lower() in (".mp3", ".flac", ".m4a"):
+                    target = fp
+                    break
+        except Exception as e:
+            raise HTTPException(status_code=404, detail=f"dossier illisible: {e}")
+    if not target or not target.exists():
+        raise HTTPException(status_code=404, detail="fichier introuvable")
+    ft = compressor.detect_filetype(target)
+    if not ft:
+        raise HTTPException(status_code=415, detail="type non supporté")
+    try:
+        _, pics = compressor.read_tags_and_pictures(target, ft)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"lecture pochette: {e}")
+    if not pics:
+        raise HTTPException(status_code=404, detail="aucune pochette")
+    pic = pics[0]
+    try:
+        newpic, q, target_met = compressor.compress_picture(pic, int(max_kb) * 1024, 40, 95,
+                                                             max_px=int(max_px), allow_downscale=allow_downscale)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"compression: {e}")
+    return {
+        "format": newpic.fmt, "width": newpic.width, "height": newpic.height,
+        "size": newpic.size, "quality": q, "target_met": target_met,
+    }
+
+
 @router.get("/baks")
 def cover_list_baks():
     """Liste les .bak sous BAK_SOURCE_ROOT (toute la bibliotheque). Lecture seule."""
