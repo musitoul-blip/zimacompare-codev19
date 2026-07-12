@@ -87,8 +87,11 @@ export default function TabBluos({ status }) {
   const [coverAnalysis, setCoverAnalysis] = useState(null)
   const [coverLoading, setCoverLoading] = useState(false)
   const [coverErr, setCoverErr] = useState('')
-  const [applyBusy, setApplyBusy] = useState('')   // folder en cours, ou ''
-  const [applyMsg, setApplyMsg] = useState({})     // { [folder]: message }
+  const [settings, setSettings] = useState({ maxKb: 1000, maxPx: 700, allowDownscale: false })
+  const [albumSettings, setAlbumSettings] = useState({})   // { [title]: {maxKb?,maxPx?,allowDownscale?} }
+  const [previewFor, setPreviewFor] = useState(null)        // album en cours d'aperçu, ou null
+  const [applyBusy, setApplyBusy] = useState('')   // title en cours, ou ''
+  const [applyMsg, setApplyMsg] = useState({})     // { [title]: message }
   const [baksOpen, setBaksOpen] = useState(false)
   const [baksLoading, setBaksLoading] = useState(false)
   const [baksErr, setBaksErr] = useState('')
@@ -198,17 +201,36 @@ export default function TabBluos({ status }) {
     finally { setCoverLoading(false) }
   }
 
-  async function applyCorrection(folder) {
-    setApplyBusy(folder)
-    setApplyMsg(m => ({ ...m, [folder]: '' }))
+  function effectiveSettings(title) {
+    return { ...settings, ...(albumSettings[title] || {}) }
+  }
+  function setAlbumSetting(title, patch) {
+    setAlbumSettings(m => ({ ...m, [title]: { ...(m[title] || {}), ...patch } }))
+  }
+  function resetAlbumSettings(title) {
+    setAlbumSettings(m => { const c = { ...m }; delete c[title]; return c })
+  }
+  function openPreview(a) { setPreviewFor(a) }
+  function closePreview() { setPreviewFor(null) }
+
+  async function applyCorrection(a) {
+    const s = effectiveSettings(a.title)
+    setApplyBusy(a.title)
+    setApplyMsg(m => ({ ...m, [a.title]: '' }))
     try {
-      await api.coverApply({ source: folder })
-      setApplyMsg(m => ({ ...m, [folder]: '✓ lancé' }))
+      await api.coverApply({
+        source: a.folder,
+        max_kb: s.maxKb,
+        max_px: s.maxPx,
+        allow_downscale: s.allowDownscale,
+        only_paths: a.paths || [],
+      })
+      setApplyMsg(m => ({ ...m, [a.title]: '✓ lancé' }))
     } catch (e) {
       const txt = e.status === 403
-        ? '⏳ Écriture désactivée (activation au LOT 5)'
+        ? '⏳ Écriture désactivée (COVER_ALLOW_WRITE=false)'
         : '✗ ' + e.message
-      setApplyMsg(m => ({ ...m, [folder]: txt }))
+      setApplyMsg(m => ({ ...m, [a.title]: txt }))
     } finally {
       setApplyBusy('')
     }
@@ -231,7 +253,7 @@ export default function TabBluos({ status }) {
     setBaksMoving(true); setBaksErr('')
     try { setBaksReport(await api.coverBaksMove()) }
     catch (e) {
-      setBaksErr(e.status === 403 ? '⏳ Écriture désactivée (activation au LOT 5)' : '✗ ' + e.message)
+      setBaksErr(e.status === 403 ? '⏳ Écriture désactivée (COVER_ALLOW_WRITE=false)' : '✗ ' + e.message)
     } finally { setBaksMoving(false) }
   }
 
@@ -333,6 +355,24 @@ export default function TabBluos({ status }) {
               <div style={{ ...muted, marginBottom: 8 }}>
                 {coverAnalysis.corrigeables} / {coverAnalysis.total} corrigeables
               </div>
+              <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 8, flexWrap: 'wrap' }}>
+                <span style={muted}>Réglages par défaut :</span>
+                <label style={{ fontSize: 13 }}>Poids max (Ko)
+                  <input type="number" value={settings.maxKb}
+                         onChange={e => setSettings(s => ({ ...s, maxKb: Number(e.target.value) }))}
+                         style={{ width: 80, marginLeft: 4 }} />
+                </label>
+                <label style={{ fontSize: 13 }}>Dimension max (px)
+                  <input type="number" value={settings.maxPx}
+                         onChange={e => setSettings(s => ({ ...s, maxPx: Number(e.target.value) }))}
+                         style={{ width: 80, marginLeft: 4 }} />
+                </label>
+                <label style={{ fontSize: 13 }}>
+                  <input type="checkbox" checked={settings.allowDownscale}
+                         onChange={e => setSettings(s => ({ ...s, allowDownscale: e.target.checked }))} />
+                  {' '}Autoriser la réduction
+                </label>
+              </div>
               <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
                 <thead><tr style={{ textAlign: 'left', color: 'var(--muted)' }}>
                   <th style={{ padding: 4 }}>Artiste</th><th style={{ padding: 4 }}>Album</th>
@@ -355,13 +395,12 @@ export default function TabBluos({ status }) {
                         {a.cover_size ? ` · ${Math.round(a.cover_size / 1024)} Ko` : ''}
                       </td>
                       <td style={{ padding: 4 }}>
-                        {a.corrigeable && a.folder && (
-                          <button onClick={() => applyCorrection(a.folder)} disabled={applyBusy === a.folder}
-                                  style={{ fontSize: 12, padding: '2px 8px' }}>
-                            {applyBusy === a.folder ? '...' : 'Corriger'}
+                        {a.corrigeable && a.paths && a.paths.length > 0 && (
+                          <button onClick={() => openPreview(a)} style={{ fontSize: 12, padding: '2px 8px' }}>
+                            👁 Aperçu
                           </button>
                         )}
-                        {applyMsg[a.folder] && <span style={{ fontSize: 12, marginLeft: 6 }}>{applyMsg[a.folder]}</span>}
+                        {applyMsg[a.title] && <span style={{ fontSize: 12, marginLeft: 6 }}>{applyMsg[a.title]}</span>}
                       </td>
                     </tr>
                   ))}
@@ -456,6 +495,67 @@ export default function TabBluos({ status }) {
           </div>
         </div>
       )}
+
+      {previewFor && (() => {
+        const s = effectiveSettings(previewFor.title)
+        const common = { path: previewFor.sample_path, maxKb: s.maxKb, maxPx: s.maxPx, allowDownscale: s.allowDownscale }
+        return (
+          <div style={{
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
+          }} onClick={closePreview}>
+            <div style={{
+              background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8,
+              padding: 20, width: 760, maxWidth: '90vw', maxHeight: '85vh', overflowY: 'auto',
+            }} onClick={e => e.stopPropagation()}>
+              <h3 style={{ marginTop: 0, fontSize: 15 }}>{previewFor.artist} — {previewFor.title}</h3>
+
+              <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
+                <label style={{ fontSize: 13 }}>Poids max (Ko)
+                  <input type="number" value={s.maxKb}
+                         onChange={e => setAlbumSetting(previewFor.title, { maxKb: Number(e.target.value) })}
+                         style={{ width: 80, marginLeft: 4 }} />
+                </label>
+                <label style={{ fontSize: 13 }}>Dimension max (px)
+                  <input type="number" value={s.maxPx}
+                         onChange={e => setAlbumSetting(previewFor.title, { maxPx: Number(e.target.value) })}
+                         style={{ width: 80, marginLeft: 4 }} />
+                </label>
+                <label style={{ fontSize: 13 }}>
+                  <input type="checkbox" checked={s.allowDownscale}
+                         onChange={e => setAlbumSetting(previewFor.title, { allowDownscale: e.target.checked })} />
+                  {' '}Autoriser la réduction
+                </label>
+                <button onClick={() => resetAlbumSettings(previewFor.title)} style={{ fontSize: 12 }}>
+                  Réinitialiser
+                </button>
+              </div>
+
+              <div style={{ display: 'flex', gap: 16 }}>
+                <div style={{ flex: 1 }}>
+                  <div style={muted}>Avant</div>
+                  <img src={api.coverFullUrl({ ...common, after: false })}
+                       alt="avant" style={{ maxWidth: '100%', borderRadius: 4 }} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={muted}>Après</div>
+                  <img src={api.coverFullUrl({ ...common, after: true })}
+                       alt="après" style={{ maxWidth: '100%', borderRadius: 4 }} />
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: 8, marginTop: 12, justifyContent: 'flex-end', alignItems: 'center' }}>
+                {applyMsg[previewFor.title] && <span style={{ fontSize: 12 }}>{applyMsg[previewFor.title]}</span>}
+                <button className="btn-primary" disabled={applyBusy === previewFor.title}
+                        onClick={() => applyCorrection(previewFor)}>
+                  {applyBusy === previewFor.title ? '...' : 'Corriger avec ces réglages'}
+                </button>
+                <button onClick={closePreview}>Fermer</button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
     </div>
   )
 }

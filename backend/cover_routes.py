@@ -175,7 +175,10 @@ def cover_consistency():
 @router.get("/bluos/analysis")
 def cover_bluos_analysis(max_kb: int = 1000):
     """Croise la liste BluOS (lecteur) avec master_scan.csv pour indiquer,
-    par album fautif, si la pochette source est corrigeable par ZimaCover."""
+    par album fautif, si la pochette source est corrigeable par ZimaCover.
+    Accumule tous les filepath (absolus) de chaque album -> sample_path (aperçu)
+    et paths (restriction only_paths, LOT 5c : un dossier peut contenir plusieurs
+    albums, la correction doit cibler exactement les pistes de CET album)."""
     max_bytes = int(max_kb) * 1024
     bluos = bluos_results()
     fautifs = [x for x in bluos.get("network", []) if x.get("status") and x.get("status") != "ok"]
@@ -194,23 +197,28 @@ def cover_bluos_analysis(max_kb: int = 1000):
                 c_sz = lm.get("cover_size"); c_w = lm.get("cover_width"); c_h = lm.get("cover_height")
                 for row in rd:
                     alb = (row.get(c_alb) if c_alb else "") or ""
-                    if not alb or alb in by_album:
+                    if not alb:
                         continue
-                    has = (row.get(c_has, "") if c_has else "").strip().lower() in ("yes", "true", "1")
-                    if not has:
-                        continue
-                    try:
-                        sz = int(float(row.get(c_sz) or 0))
-                    except Exception:
-                        sz = 0
                     fp = row.get(c_fp) if c_fp else ""
-                    by_album[alb] = {
-                        "folder": os.path.dirname(fp) if fp else "",
-                        "cover_format": (row.get(c_fmt) if c_fmt else "") or "",
-                        "cover_size": sz,
-                        "cover_width": int(float(row.get(c_w) or 0)) if c_w else 0,
-                        "cover_height": int(float(row.get(c_h) or 0)) if c_h else 0,
-                    }
+                    entry = by_album.setdefault(alb, {
+                        "folder": "", "cover_format": "", "cover_size": 0,
+                        "cover_width": 0, "cover_height": 0,
+                        "paths": [], "has_cover_row": False,
+                    })
+                    if fp:
+                        entry["paths"].append(fp)
+                    has = (row.get(c_has, "") if c_has else "").strip().lower() in ("yes", "true", "1")
+                    if has and not entry["has_cover_row"]:
+                        try:
+                            sz = int(float(row.get(c_sz) or 0))
+                        except Exception:
+                            sz = 0
+                        entry["folder"] = os.path.dirname(fp) if fp else ""
+                        entry["cover_format"] = (row.get(c_fmt) if c_fmt else "") or ""
+                        entry["cover_size"] = sz
+                        entry["cover_width"] = int(float(row.get(c_w) or 0)) if c_w else 0
+                        entry["cover_height"] = int(float(row.get(c_h) or 0)) if c_h else 0
+                        entry["has_cover_row"] = True
         except Exception:
             pass
 
@@ -221,9 +229,12 @@ def cover_bluos_analysis(max_kb: int = 1000):
         corrigeable = False
         raison = "pochette introuvable sur le disque"
         folder = ""; cf = ""; cs = 0; cw = 0; ch = 0
-        if info:
+        sample_path = ""; paths = []
+        if info and info["has_cover_row"]:
             folder = info["folder"]; cf = info["cover_format"]; cs = info["cover_size"]
             cw = info["cover_width"]; ch = info["cover_height"]
+            paths = info["paths"]
+            sample_path = paths[0] if paths else ""
             fmt_up = (cf or "").upper().replace("IMAGE/", "").strip()
             if fmt_up and fmt_up not in ("JPEG", "JPG"):
                 corrigeable = True; raison = f"format {cf} (reconvertir en JPEG)"
@@ -237,6 +248,7 @@ def cover_bluos_analysis(max_kb: int = 1000):
             "artist": x.get("artist", ""), "title": title, "status": x.get("status", ""),
             "corrigeable": corrigeable, "raison": raison, "folder": folder,
             "cover_format": cf, "cover_size": cs, "cover_width": cw, "cover_height": ch,
+            "sample_path": sample_path, "paths": paths,
         })
     nb_corr = sum(1 for o in out if o["corrigeable"])
     return {"player": bluos.get("player"), "total": len(fautifs),
@@ -298,8 +310,9 @@ def cover_thumbnail(folder: str = "", path: str = "", max_px: int = 700, max_kb:
 
 
 @router.get("/full")
-def cover_full(folder: str = "", path: str = "", which: str = "before", max_px: int = 700, max_kb: int = 1000):
-    """Sert la pochette en binaire (image/jpeg). which=before|after. Aucune écriture."""
+def cover_full(folder: str = "", path: str = "", after: bool = False,
+               max_px: int = 700, max_kb: int = 1000, allow_downscale: bool = True):
+    """Sert la pochette en binaire (image/jpeg). after=false|true (avant/après compression simulée). Aucune écriture."""
     target = None
     if path:
         _check_allowed_prefix(path)
@@ -325,10 +338,10 @@ def cover_full(folder: str = "", path: str = "", which: str = "before", max_px: 
     if not pics:
         raise HTTPException(status_code=404, detail="aucune pochette")
     pic = pics[0]
-    if which == "after":
+    if after:
         try:
             newpic, _q, _m = compressor.compress_picture(pic, int(max_kb) * 1024, 40, 95,
-                                                         max_px=int(max_px), allow_downscale=True)
+                                                         max_px=int(max_px), allow_downscale=allow_downscale)
             pic = newpic
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"compression: {e}")

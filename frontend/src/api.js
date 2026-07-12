@@ -54,6 +54,16 @@ export const api = {
   coverApply:         (body)    => req('POST', '/cover/apply', body),
   coverBaks:          ()        => req('GET',  '/cover/baks'),
   coverBaksMove:      ()        => req('POST', '/cover/baks/move'),
+  coverFullUrl:       ({ path = '', folder = '', after = false, maxKb, maxPx, allowDownscale } = {}) => {
+    const p = new URLSearchParams()
+    if (path) p.set('path', path)
+    if (folder) p.set('folder', folder)
+    p.set('after', after ? 'true' : 'false')
+    if (maxKb != null) p.set('max_kb', maxKb)
+    if (maxPx != null) p.set('max_px', maxPx)
+    if (allowDownscale != null) p.set('allow_downscale', allowDownscale ? 'true' : 'false')
+    return `/api/cover/full?${p.toString()}`
+  },
   reports:       ()       => req('GET',  '/reports'),
   scanResults:   (p)      => req('GET',  `/scan-results?${new URLSearchParams(p)}`),
   diffReport:    ()       => req('GET',  '/diff-report'),
