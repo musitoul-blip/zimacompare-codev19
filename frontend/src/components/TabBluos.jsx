@@ -95,6 +95,8 @@ export default function TabBluos({ status }) {
   const [afterInfoErr, setAfterInfoErr] = useState('')
   const [applyBusy, setApplyBusy] = useState('')   // title en cours, ou ''
   const [applyMsg, setApplyMsg] = useState({})     // { [title]: message }
+  const [jobProgress, setJobProgress] = useState(null)   // {running,processed,total,eta_seconds,fps} ou null
+  const [jobResult, setJobResult] = useState(null)        // {written,errors,...} ou null
   const [baksOpen, setBaksOpen] = useState(false)
   const [baksLoading, setBaksLoading] = useState(false)
   const [baksErr, setBaksErr] = useState('')
@@ -102,6 +104,7 @@ export default function TabBluos({ status }) {
   const [baksMoving, setBaksMoving] = useState(false)
   const [baksReport, setBaksReport] = useState(null) // {moved,skipped,errors,...}
   const pollRef = useRef(null)
+  const coverPollRef = useRef(null)   // polling du job de correction pochettes (LOT 5g)
 
   // param IP courant (extrait des params pour le champ dedie)
   const ipParam = params.find(p => p.param_key === 'bluos_ip')
@@ -132,7 +135,10 @@ export default function TabBluos({ status }) {
   }, [sourcePath])
 
   // cleanup polling au demontage
-  useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current) }, [])
+  useEffect(() => () => {
+    if (pollRef.current) clearInterval(pollRef.current)
+    if (coverPollRef.current) clearInterval(coverPollRef.current)
+  }, [])
 
   // Rafraichit les metadonnees "apres" de la modale d'apercu a chaque changement
   // de reglage (global ou par album), ou d'album affiche.
@@ -230,10 +236,46 @@ export default function TabBluos({ status }) {
   function openPreview(a) { setPreviewFor(a) }
   function closePreview() { setPreviewFor(null) }
 
+  function fmtCoverEta(secs) {
+    if (!secs || secs <= 0) return ''
+    if (secs < 60) return `~${secs}s`
+    const m = Math.floor(secs / 60)
+    const s = secs % 60
+    return `~${m}min ${s}s`
+  }
+
+  function startCoverPolling(title) {
+    if (coverPollRef.current) clearInterval(coverPollRef.current)
+    coverPollRef.current = setInterval(async () => {
+      try {
+        const pg = await api.coverProgress()
+        setJobProgress(pg)
+        if (pg.running) {
+          const eta = pg.eta_seconds > 0 ? ` — ${fmtCoverEta(pg.eta_seconds)} restantes` : ''
+          setApplyMsg(m => ({ ...m, [title]: `⏳ ${pg.processed}/${pg.total}${eta}` }))
+        } else {
+          clearInterval(coverPollRef.current); coverPollRef.current = null
+          let result = null
+          try { result = await api.coverResult() } catch (e) { /* ignore */ }
+          setJobResult(result)
+          const written = result?.written ?? 0
+          const errors = result?.errors ?? 0
+          setApplyMsg(m => ({
+            ...m,
+            [title]: errors > 0 ? `✗ ${errors} erreur(s)` : `✓ terminé — ${written} fichier(s)`,
+          }))
+          setApplyBusy('')
+        }
+      } catch (e) { /* transitoire, meme logique que startPolling (scan BluOS) */ }
+    }, 1500)
+  }
+
   async function applyCorrection(a) {
     const s = effectiveSettings(a.title)
     setApplyBusy(a.title)
-    setApplyMsg(m => ({ ...m, [a.title]: '' }))
+    setApplyMsg(m => ({ ...m, [a.title]: '⏳ lancé' }))
+    setJobProgress(null)
+    setJobResult(null)
     try {
       await api.coverApply({
         source: a.folder,
@@ -242,13 +284,12 @@ export default function TabBluos({ status }) {
         allow_downscale: s.allowDownscale,
         only_paths: a.paths || [],
       })
-      setApplyMsg(m => ({ ...m, [a.title]: '✓ lancé' }))
+      startCoverPolling(a.title)
     } catch (e) {
       const txt = e.status === 403
         ? '⏳ Écriture désactivée (COVER_ALLOW_WRITE=false)'
         : '✗ ' + e.message
       setApplyMsg(m => ({ ...m, [a.title]: txt }))
-    } finally {
       setApplyBusy('')
     }
   }
@@ -364,7 +405,7 @@ export default function TabBluos({ status }) {
             <button className="btn-primary" onClick={analyzeCovers} disabled={coverLoading}>
               {coverLoading ? 'Analyse...' : '🖼 Analyser les corrections pochettes'}
             </button>
-            <button onClick={openBaks} style={{ marginLeft: 'auto' }}>🗑 Gérer les .bak</button>
+            <button onClick={openBaks} style={{ marginLeft: 'auto' }} disabled={!!applyBusy}>🗑 Gérer les .bak</button>
             {coverErr && <span style={{ color: 'var(--danger)', fontSize: 13 }}>✗ {coverErr}</span>}
           </div>
           {coverAnalysis && (
