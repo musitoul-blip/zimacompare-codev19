@@ -1,6 +1,8 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { api, fmtSize } from '../api.js'
 import CoverPreviewModal from './CoverPreviewModal.jsx'
+import BakManagerModal from './BakManagerModal.jsx'
+import { useBakManager } from './useBakManager.js'
 
 // ============================================================================
 // Onglet Pochettes (LOT 8c) : tous les albums de la bibliotheque (pas
@@ -45,6 +47,7 @@ export default function TabCovers() {
   const [applyBusy, setApplyBusy] = useState('')     // cle en cours, ou ''
   const [applyMsg, setApplyMsg] = useState({})       // { [cle]: message }
   const coverPollRef = useRef(null)
+  const bak = useBakManager()
 
   async function load() {
     setLoading(true); setErr('')
@@ -165,6 +168,9 @@ export default function TabCovers() {
       <h2 style={{ fontSize: 18, marginBottom: 4 }}>🖼 Pochettes</h2>
       <p style={muted}>Tous les albums de la bibliothèque (via master_scan.csv), groupés par artiste d'album —
         aperçu et correction indépendamment des albums signalés fautifs par BluOS.</p>
+      <p style={{ ...muted, fontSize: 12 }}>
+        ℹ️ Données issues du dernier scan tagaudit — relancez un scan pour voir les corrections récentes.
+      </p>
 
       <div style={card}>
         {loading && <div style={muted}>Chargement...</div>}
@@ -185,7 +191,11 @@ export default function TabCovers() {
                        onChange={e => setMinKb(Number(e.target.value))}
                        style={{ width: 80, marginLeft: 4 }} />
               </label>
+              <button onClick={load} disabled={loading} style={{ fontSize: 12 }}>
+                {loading ? '...' : '🔄 Rafraîchir'}
+              </button>
               <span style={muted}>{filtered.length} / {albums.length} albums</span>
+              <button onClick={bak.openBaks} style={{ marginLeft: 'auto' }} disabled={!!applyBusy}>🗑 Gérer les .bak</button>
             </div>
 
             <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
@@ -245,6 +255,18 @@ export default function TabCovers() {
           />
         )
       })()}
+
+      {bak.baksOpen && (
+        <BakManagerModal
+          loading={bak.baksLoading}
+          err={bak.baksErr}
+          list={bak.baksList}
+          moving={bak.baksMoving}
+          report={bak.baksReport}
+          onMove={bak.moveBaks}
+          onClose={bak.closeBaks}
+        />
+      )}
     </div>
   )
 }

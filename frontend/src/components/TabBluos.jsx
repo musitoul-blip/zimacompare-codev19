@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
-import { api, fmtSize } from '../api.js'
+import { api } from '../api.js'
 import CoverPreviewModal from './CoverPreviewModal.jsx'
+import BakManagerModal from './BakManagerModal.jsx'
+import { useBakManager } from './useBakManager.js'
 
 // --- Actions chemin (identiques au rapport d'audit ZimaTag) ---
 function ztCopy(text, btn) {
@@ -95,12 +97,7 @@ export default function TabBluos({ status }) {
   const [applyMsg, setApplyMsg] = useState({})     // { [title]: message }
   const [jobProgress, setJobProgress] = useState(null)   // {running,processed,total,eta_seconds,fps} ou null
   const [jobResult, setJobResult] = useState(null)        // {written,errors,...} ou null
-  const [baksOpen, setBaksOpen] = useState(false)
-  const [baksLoading, setBaksLoading] = useState(false)
-  const [baksErr, setBaksErr] = useState('')
-  const [baksList, setBaksList] = useState(null)    // {root,total,total_size,files}
-  const [baksMoving, setBaksMoving] = useState(false)
-  const [baksReport, setBaksReport] = useState(null) // {moved,skipped,errors,...}
+  const bak = useBakManager()
   const pollRef = useRef(null)
   const coverPollRef = useRef(null)   // polling du job de correction pochettes (LOT 5g)
 
@@ -280,25 +277,6 @@ export default function TabBluos({ status }) {
 
   const flagged = results?.network ? results.network.filter(r => r.status !== 'ok') : []
 
-  async function openBaks() {
-    setBaksOpen(true); setBaksReport(null); setBaksErr(''); setBaksList(null); setBaksLoading(true)
-    try { setBaksList(await api.coverBaks()) }
-    catch (e) { setBaksErr(e.message) }
-    finally { setBaksLoading(false) }
-  }
-
-  function closeBaks() {
-    setBaksOpen(false); setBaksList(null); setBaksReport(null); setBaksErr('')
-  }
-
-  async function moveBaks() {
-    setBaksMoving(true); setBaksErr('')
-    try { setBaksReport(await api.coverBaksMove()) }
-    catch (e) {
-      setBaksErr(e.status === 403 ? '⏳ Écriture désactivée (COVER_ALLOW_WRITE=false)' : '✗ ' + e.message)
-    } finally { setBaksMoving(false) }
-  }
-
   return (
     <div>
       <h2 style={{ fontSize: 18, marginBottom: 4 }}>📻 BluOS Artwork Scanner</h2>
@@ -389,7 +367,7 @@ export default function TabBluos({ status }) {
             <button className="btn-primary" onClick={analyzeCovers} disabled={coverLoading}>
               {coverLoading ? 'Analyse...' : '🖼 Analyser les corrections pochettes'}
             </button>
-            <button onClick={openBaks} style={{ marginLeft: 'auto' }} disabled={!!applyBusy}>🗑 Gérer les .bak</button>
+            <button onClick={bak.openBaks} style={{ marginLeft: 'auto' }} disabled={!!applyBusy}>🗑 Gérer les .bak</button>
             {coverErr && <span style={{ color: 'var(--danger)', fontSize: 13 }}>✗ {coverErr}</span>}
           </div>
           {coverAnalysis && (
@@ -491,56 +469,16 @@ export default function TabBluos({ status }) {
         </div>
       )}
 
-      {baksOpen && (
-        <div style={{
-          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
-        }} onClick={closeBaks}>
-          <div style={{
-            background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8,
-            padding: 20, width: 560, maxWidth: '90vw', maxHeight: '80vh',
-            display: 'flex', flexDirection: 'column',
-          }} onClick={e => e.stopPropagation()}>
-            <h3 style={{ marginTop: 0, fontSize: 15 }}>Fichiers .bak</h3>
-            {baksLoading && <div style={muted}>Chargement...</div>}
-            {baksErr && <div style={{ color: 'var(--danger)', fontSize: 13, marginBottom: 8 }}>✗ {baksErr}</div>}
-
-            {!baksReport && baksList && (
-              <>
-                <div style={{ ...muted, marginBottom: 8 }}>
-                  {baksList.total} fichier(s), {fmtSize(baksList.total_size)} — {baksList.root}
-                </div>
-                <div style={{ overflowY: 'auto', flex: 1, border: '1px solid var(--border)', borderRadius: 4 }}>
-                  {baksList.files.length === 0 && <div style={{ ...muted, padding: 8 }}>Aucun .bak.</div>}
-                  {baksList.files.map((f, i) => (
-                    <div key={i} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, padding: '4px 8px', borderTop: i ? '1px solid var(--border)' : 'none', fontSize: 12 }}>
-                      <span>{f.album} / {f.path.split('/').pop()}</span>
-                      <span style={muted}>{fmtSize(f.size)}</span>
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
-
-            {baksReport && (
-              <div style={{ fontSize: 13 }}>
-                <div style={{ color: 'var(--success)' }}>{baksReport.moved} déplacé(s)</div>
-                {baksReport.skipped > 0 && <div style={{ color: 'var(--warning)' }}>{baksReport.skipped} ignoré(s) (déjà archivés)</div>}
-                {baksReport.errors > 0 && <div style={{ color: 'var(--danger)' }}>{baksReport.errors} erreur(s)</div>}
-              </div>
-            )}
-
-            <div style={{ display: 'flex', gap: 8, marginTop: 12, justifyContent: 'flex-end' }}>
-              {!baksReport && (
-                <button className="btn-primary" onClick={moveBaks}
-                        disabled={baksMoving || baksLoading || !baksList || baksList.total === 0}>
-                  {baksMoving ? 'Déplacement...' : 'Déplacer vers 00_A_supp'}
-                </button>
-              )}
-              <button onClick={closeBaks}>{baksReport ? 'Fermer' : 'Annuler'}</button>
-            </div>
-          </div>
-        </div>
+      {bak.baksOpen && (
+        <BakManagerModal
+          loading={bak.baksLoading}
+          err={bak.baksErr}
+          list={bak.baksList}
+          moving={bak.baksMoving}
+          report={bak.baksReport}
+          onMove={bak.moveBaks}
+          onClose={bak.closeBaks}
+        />
       )}
 
       {previewFor && (
