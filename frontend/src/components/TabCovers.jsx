@@ -34,8 +34,10 @@ export default function TabCovers() {
   const [err, setErr] = useState('')
 
   const [search, setSearch] = useState('')
-  const [minDim, setMinDim] = useState(0)
-  const [minKb, setMinKb] = useState(0)
+  const [dimMin, setDimMin] = useState('')
+  const [dimMax, setDimMax] = useState('')
+  const [kbMin, setKbMin] = useState('')
+  const [kbMax, setKbMax] = useState('')
   const [sortKey, setSortKey] = useState('albumartist')
   const [sortDir, setSortDir] = useState('asc')
 
@@ -139,12 +141,18 @@ export default function TabCovers() {
   const filtered = useMemo(() => {
     if (!albums) return []
     const q = search.trim().toLowerCase()
+    const dMin = dimMin !== '' ? Number(dimMin) : null
+    const dMax = dimMax !== '' ? Number(dimMax) : null
+    const kMin = kbMin !== '' ? Number(kbMin) : null
+    const kMax = kbMax !== '' ? Number(kbMax) : null
     const out = albums.filter(a => {
       if (q && !`${a.albumartist} ${a.album}`.toLowerCase().includes(q)) return false
       const dim = Math.max(a.cover_width || 0, a.cover_height || 0)
-      if (minDim > 0 && !(dim > minDim)) return false
+      if (dMin != null && !(dim >= dMin)) return false
+      if (dMax != null && !(dim <= dMax)) return false
       const kb = (a.cover_size || 0) / 1024
-      if (minKb > 0 && !(kb > minKb)) return false
+      if (kMin != null && !(kb >= kMin)) return false
+      if (kMax != null && !(kb <= kMax)) return false
       return true
     })
     out.sort((a, b) => {
@@ -156,7 +164,7 @@ export default function TabCovers() {
       return sortDir === 'desc' ? -r : r
     })
     return out
-  }, [albums, search, minDim, minKb, sortKey, sortDir])
+  }, [albums, search, dimMin, dimMax, kbMin, kbMax, sortKey, sortDir])
 
   function toggleSort(k) {
     if (sortKey === k) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
@@ -181,16 +189,26 @@ export default function TabCovers() {
               <input placeholder="Rechercher artiste ou album..." value={search}
                      onChange={e => setSearch(e.target.value)}
                      style={{ width: 260, fontSize: 13 }} />
-              <label style={{ fontSize: 13 }}>Dimension &gt; (px)
-                <input type="number" value={minDim}
-                       onChange={e => setMinDim(Number(e.target.value))}
-                       style={{ width: 80, marginLeft: 4 }} />
-              </label>
-              <label style={{ fontSize: 13 }}>Poids &gt; (Ko)
-                <input type="number" value={minKb}
-                       onChange={e => setMinKb(Number(e.target.value))}
-                       style={{ width: 80, marginLeft: 4 }} />
-              </label>
+              <div style={{ display: 'flex', gap: 4, alignItems: 'center', fontSize: 13 }}>
+                <span>Dimension entre (px)</span>
+                <input type="number" placeholder="min" value={dimMin}
+                       onChange={e => setDimMin(e.target.value)}
+                       style={{ width: 70 }} />
+                <span>et</span>
+                <input type="number" placeholder="max" value={dimMax}
+                       onChange={e => setDimMax(e.target.value)}
+                       style={{ width: 70 }} />
+              </div>
+              <div style={{ display: 'flex', gap: 4, alignItems: 'center', fontSize: 13 }}>
+                <span>Poids entre (Ko)</span>
+                <input type="number" placeholder="min" value={kbMin}
+                       onChange={e => setKbMin(e.target.value)}
+                       style={{ width: 70 }} />
+                <span>et</span>
+                <input type="number" placeholder="max" value={kbMax}
+                       onChange={e => setKbMax(e.target.value)}
+                       style={{ width: 70 }} />
+              </div>
               <button onClick={load} disabled={loading} style={{ fontSize: 12 }}>
                 {loading ? '...' : '🔄 Rafraîchir'}
               </button>
@@ -264,6 +282,12 @@ export default function TabCovers() {
           moving={bak.baksMoving}
           report={bak.baksReport}
           onMove={bak.moveBaks}
+          deleting={bak.baksDeleting}
+          deleteReport={bak.baksDeleteReport}
+          onDeleteRedundant={bak.deleteRedundantBaks}
+          purging={bak.baksPurging}
+          purgeReport={bak.baksPurgeReport}
+          onPurgeArchive={bak.purgeArchive}
           onClose={bak.closeBaks}
         />
       )}

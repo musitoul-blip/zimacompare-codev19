@@ -489,16 +489,125 @@ def cover_preview_info(folder: str = "", path: str = "", max_px: int = 700,
 
 @router.get("/baks")
 def cover_list_baks():
-    """Liste les .bak sous BAK_SOURCE_ROOT (toute la bibliotheque). Lecture seule."""
+    """Liste les .bak sous BAK_SOURCE_ROOT (toute la bibliotheque), avec pour
+    chacun already_archived (jumeau present dans BAK_DEST_ROOT) -- LOT 8e,
+    pour piloter delete-redundant depuis le front. archive_count/archive_size
+    donnent l'etat de l'archive elle-meme, pour purge-archive."""
     files = _find_bak_files()
+    file_entries = []
+    already_archived_count = 0
+    for fp, size in files:
+        rel = fp.relative_to(BAK_SOURCE_ROOT)
+        dst = BAK_DEST_ROOT / rel
+        archived = dst.exists()
+        if archived:
+            already_archived_count += 1
+        file_entries.append({
+            "path": str(fp), "album": fp.parent.name, "size": size,
+            "already_archived": archived,
+        })
+
+    archive_sizes = []
+    if BAK_DEST_ROOT.exists():
+        for dirpath, _dirnames, filenames in os.walk(BAK_DEST_ROOT):
+            for fn in filenames:
+                if fn.endswith(".bak"):
+                    try:
+                        archive_sizes.append((Path(dirpath) / fn).stat().st_size)
+                    except OSError:
+                        continue
+
     return {
         "root": str(BAK_SOURCE_ROOT),
         "total": len(files),
         "total_size": sum(size for _fp, size in files),
-        "files": [
-            {"path": str(fp), "album": fp.parent.name, "size": size}
-            for fp, size in files
-        ],
+        "already_archived_count": already_archived_count,
+        "archive_count": len(archive_sizes),
+        "archive_size": sum(archive_sizes),
+        "files": file_entries,
+    }
+
+
+@router.post("/baks/delete-redundant")
+def cover_delete_redundant_baks():
+    """Supprime les .bak de BAK_SOURCE_ROOT qui ont deja un jumeau archive
+    dans BAK_DEST_ROOT (meme chemin relatif). Ne supprime JAMAIS un .bak sans
+    jumeau archive -- ce serait detruire la seule sauvegarde existante.
+    L'archive elle-meme (BAK_DEST_ROOT) n'est jamais touchee par cette route."""
+    if not COVER_ALLOW_WRITE:
+        raise HTTPException(403, "Suppression des .bak désactivée (COVER_ALLOW_WRITE non activé)")
+    if compressor.STATE.running:
+        raise HTTPException(409, "Un job de correction est en cours")
+
+    source_resolved = BAK_SOURCE_ROOT.resolve()
+    deleted, skipped, errors = [], [], []
+    for fp, _size in _find_bak_files():
+        if not fp.name.endswith(".bak"):
+            errors.append({"path": str(fp), "error": "extension inattendue"})
+            continue
+        rp = fp.resolve()
+        if not str(rp).startswith(str(source_resolved) + os.sep):
+            errors.append({"path": str(fp), "error": "hors périmètre BAK_SOURCE_ROOT"})
+            continue
+        rel = fp.relative_to(BAK_SOURCE_ROOT)
+        dst = BAK_DEST_ROOT / rel
+        if not dst.exists():
+            skipped.append({"path": str(fp), "reason": "pas de jumeau archivé"})
+            continue
+        try:
+            fp.unlink()
+            deleted.append({"path": str(fp), "archived_twin": str(dst)})
+        except Exception as e:
+            errors.append({"path": str(fp), "error": str(e)})
+
+    return {
+        "deleted": len(deleted), "skipped": len(skipped), "errors": len(errors),
+        "details_deleted": deleted, "details_skipped": skipped, "details_errors": errors,
+    }
+
+
+@router.post("/baks/purge-archive")
+def cover_purge_archive():
+    """Vide entierement l'archive BAK_DEST_ROOT (tous les *.bak) et nettoie les
+    dossiers vides restants. IRREVERSIBLE : l'utilisateur a deja confirme
+    (double confirmation cote front) que les corrections sont validees --
+    cette route ne fait aucune verification de jumeau, contrairement a
+    delete-redundant."""
+    if not COVER_ALLOW_WRITE:
+        raise HTTPException(403, "Purge de l'archive désactivée (COVER_ALLOW_WRITE non activé)")
+    if compressor.STATE.running:
+        raise HTTPException(409, "Un job de correction est en cours")
+
+    dest_resolved = BAK_DEST_ROOT.resolve()
+    deleted, errors = [], []
+    if BAK_DEST_ROOT.exists():
+        for dirpath, _dirnames, filenames in os.walk(BAK_DEST_ROOT):
+            for fn in filenames:
+                if not fn.endswith(".bak"):
+                    continue
+                fp = Path(dirpath) / fn
+                rp = fp.resolve()
+                if not str(rp).startswith(str(dest_resolved) + os.sep):
+                    errors.append({"path": str(fp), "error": "hors périmètre BAK_DEST_ROOT"})
+                    continue
+                try:
+                    fp.unlink()
+                    deleted.append({"path": str(fp)})
+                except Exception as e:
+                    errors.append({"path": str(fp), "error": str(e)})
+
+        for dirpath, _dirnames, _filenames in os.walk(BAK_DEST_ROOT, topdown=False):
+            if dirpath == str(BAK_DEST_ROOT):
+                continue
+            try:
+                if not os.listdir(dirpath):
+                    os.rmdir(dirpath)
+            except OSError:
+                pass
+
+    return {
+        "deleted": len(deleted), "skipped": 0, "errors": len(errors),
+        "details_deleted": deleted, "details_errors": errors,
     }
 
 

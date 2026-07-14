@@ -56,6 +56,8 @@ export const api = {
   coverResult:        ()        => req('GET',  '/cover/result'),
   coverBaks:          ()        => req('GET',  '/cover/baks'),
   coverBaksMove:      ()        => req('POST', '/cover/baks/move'),
+  coverBaksDeleteRedundant: ()  => req('POST', '/cover/baks/delete-redundant'),
+  coverBaksPurgeArchive:    ()  => req('POST', '/cover/baks/purge-archive'),
   coverAlbums:        ()        => req('GET',  '/cover/albums'),
   coverAlbumPaths:    (albumartist, album) =>
     req('GET', `/cover/album-paths?albumartist=${encodeURIComponent(albumartist)}&album=${encodeURIComponent(album)}`),

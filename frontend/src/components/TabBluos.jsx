@@ -477,6 +477,12 @@ export default function TabBluos({ status }) {
           moving={bak.baksMoving}
           report={bak.baksReport}
           onMove={bak.moveBaks}
+          deleting={bak.baksDeleting}
+          deleteReport={bak.baksDeleteReport}
+          onDeleteRedundant={bak.deleteRedundantBaks}
+          purging={bak.baksPurging}
+          purgeReport={bak.baksPurgeReport}
+          onPurgeArchive={bak.purgeArchive}
           onClose={bak.closeBaks}
         />
       )}
