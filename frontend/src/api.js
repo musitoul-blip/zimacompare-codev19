@@ -56,6 +56,9 @@ export const api = {
   coverResult:        ()        => req('GET',  '/cover/result'),
   coverBaks:          ()        => req('GET',  '/cover/baks'),
   coverBaksMove:      ()        => req('POST', '/cover/baks/move'),
+  coverAlbums:        ()        => req('GET',  '/cover/albums'),
+  coverAlbumPaths:    (albumartist, album) =>
+    req('GET', `/cover/album-paths?albumartist=${encodeURIComponent(albumartist)}&album=${encodeURIComponent(album)}`),
   coverFullUrl:       ({ path = '', folder = '', after = false, maxKb, maxPx, allowDownscale } = {}) => {
     const p = new URLSearchParams()
     if (path) p.set('path', path)
