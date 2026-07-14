@@ -172,65 +172,118 @@ def cover_consistency():
     return compressor.consistency_report()
 
 
+def _scan_master_csv():
+    """Lit master_scan.csv et regroupe les pistes par (albumartist, album) --
+    la seule cle correcte a l'echelle de la bibliotheque (LOT 8 : `artist`
+    est un tag PAR PISTE dans cette bibliotheque -- le regrouper fragmente
+    un album en dizaines de faux groupes, 19689 vs 2158 mesures sur
+    master_scan.csv ; `albumartist` est rempli sur 100% des lignes et donne
+    le bon compte). Utilisee par /bluos/analysis (via _index_by_title),
+    /api/cover/albums et /api/cover/album-paths.
+    Retourne dict[(albumartist, album)] -> {albumartist, album, folder,
+    cover_format, cover_size, cover_width, cover_height, paths[],
+    has_cover_row}. Ne leve jamais ; dict vide si master_scan.csv
+    introuvable/illisible."""
+    csv_path = compressor._tagcfg.master_csv_path
+    by_key = {}
+    if not csv_path.exists():
+        return by_key
+    try:
+        with open(str(csv_path), "r", encoding="utf-8", newline="", errors="replace") as f:
+            sample = f.read(4096); f.seek(0)
+            delim = compressor._sniff_delimiter(sample)
+            rd = csv.DictReader(f, delimiter=delim)
+            lm = {n.lower(): n for n in (rd.fieldnames or [])}
+            c_albart = lm.get("albumartist")
+            c_alb = lm.get("album"); c_fp = lm.get("filepath") or lm.get("path")
+            c_has = lm.get("has_cover"); c_fmt = lm.get("cover_format")
+            c_sz = lm.get("cover_size"); c_w = lm.get("cover_width"); c_h = lm.get("cover_height")
+            for row in rd:
+                alb = (row.get(c_alb) if c_alb else "") or ""
+                if not alb:
+                    continue
+                albart = (row.get(c_albart) if c_albart else "") or ""
+                fp = row.get(c_fp) if c_fp else ""
+                entry = by_key.setdefault((albart, alb), {
+                    "albumartist": albart, "album": alb,
+                    "folder": "", "cover_format": "", "cover_size": 0,
+                    "cover_width": 0, "cover_height": 0,
+                    "paths": [], "has_cover_row": False,
+                })
+                if fp:
+                    entry["paths"].append(fp)
+                has = (row.get(c_has, "") if c_has else "").strip().lower() in ("yes", "true", "1")
+                if has and not entry["has_cover_row"]:
+                    try:
+                        sz = int(float(row.get(c_sz) or 0))
+                    except Exception:
+                        sz = 0
+                    entry["folder"] = os.path.dirname(fp) if fp else ""
+                    entry["cover_format"] = (row.get(c_fmt) if c_fmt else "") or ""
+                    entry["cover_size"] = sz
+                    entry["cover_width"] = int(float(row.get(c_w) or 0)) if c_w else 0
+                    entry["cover_height"] = int(float(row.get(c_h) or 0)) if c_h else 0
+                    entry["has_cover_row"] = True
+    except Exception:
+        pass
+    return by_key
+
+
+def _index_by_title(by_key):
+    """Projette by_key (cle correcte (albumartist, album)) vers un index par
+    titre seul -- le seul vocabulaire que connait BluOS. Un titre porte par
+    plusieurs albumartist distincts est un cas ambigu (LOT 8, mesure sur
+    master_scan.csv : 23 titres sur 2131, dont 'Disco' Kylie Minogue/Pet
+    Shop Boys et 'Greatest Hits' partage par 5 albumartist) : ne JAMAIS
+    fusionner leurs paths (risque d'ecrire dans le mauvais album), le
+    signaler explicitement plutot que deviner lequel BluOS visait.
+    Retourne dict[album_title] -> {"entries": [...], "albumartists": [...]}"""
+    idx = {}
+    for (albart, alb), e in by_key.items():
+        slot = idx.setdefault(alb, {"entries": [], "albumartists": []})
+        slot["entries"].append(e)
+        slot["albumartists"].append(albart)
+    return idx
+
+
 @router.get("/bluos/analysis")
 def cover_bluos_analysis(max_kb: int = 1000):
     """Croise la liste BluOS (lecteur) avec master_scan.csv pour indiquer,
     par album fautif, si la pochette source est corrigeable par ZimaCover.
-    Accumule tous les filepath (absolus) de chaque album -> sample_path (aperçu)
-    et paths (restriction only_paths, LOT 5c : un dossier peut contenir plusieurs
-    albums, la correction doit cibler exactement les pistes de CET album)."""
+    Matching par titre seul contre BluOS (BluOS ne fournit que ca). Si un
+    titre est porte par plusieurs albumartist differents dans le CSV
+    (LOT 8, garde ambiguite) : ambiguous=true, paths=[] (jamais fusionnes),
+    corrigeable=false -- correction desactivee ici, a faire depuis l'onglet
+    Pochettes (LOT 8c) qui groupe par (albumartist, album) sans ambiguite."""
     max_bytes = int(max_kb) * 1024
     bluos = bluos_results()
     fautifs = [x for x in bluos.get("network", []) if x.get("status") and x.get("status") != "ok"]
 
-    csv_path = compressor._tagcfg.master_csv_path
-    by_album = {}
-    if csv_path.exists():
-        try:
-            with open(str(csv_path), "r", encoding="utf-8", newline="", errors="replace") as f:
-                sample = f.read(4096); f.seek(0)
-                delim = compressor._sniff_delimiter(sample)
-                rd = csv.DictReader(f, delimiter=delim)
-                lm = {n.lower(): n for n in (rd.fieldnames or [])}
-                c_alb = lm.get("album"); c_fp = lm.get("filepath") or lm.get("path")
-                c_has = lm.get("has_cover"); c_fmt = lm.get("cover_format")
-                c_sz = lm.get("cover_size"); c_w = lm.get("cover_width"); c_h = lm.get("cover_height")
-                for row in rd:
-                    alb = (row.get(c_alb) if c_alb else "") or ""
-                    if not alb:
-                        continue
-                    fp = row.get(c_fp) if c_fp else ""
-                    entry = by_album.setdefault(alb, {
-                        "folder": "", "cover_format": "", "cover_size": 0,
-                        "cover_width": 0, "cover_height": 0,
-                        "paths": [], "has_cover_row": False,
-                    })
-                    if fp:
-                        entry["paths"].append(fp)
-                    has = (row.get(c_has, "") if c_has else "").strip().lower() in ("yes", "true", "1")
-                    if has and not entry["has_cover_row"]:
-                        try:
-                            sz = int(float(row.get(c_sz) or 0))
-                        except Exception:
-                            sz = 0
-                        entry["folder"] = os.path.dirname(fp) if fp else ""
-                        entry["cover_format"] = (row.get(c_fmt) if c_fmt else "") or ""
-                        entry["cover_size"] = sz
-                        entry["cover_width"] = int(float(row.get(c_w) or 0)) if c_w else 0
-                        entry["cover_height"] = int(float(row.get(c_h) or 0)) if c_h else 0
-                        entry["has_cover_row"] = True
-        except Exception:
-            pass
+    by_key = _scan_master_csv()
+    by_title = _index_by_title(by_key)
 
     out = []
     for x in fautifs:
         title = x.get("title", "") or ""
-        info = by_album.get(title)
+        idx = by_title.get(title)
         corrigeable = False
         raison = "pochette introuvable sur le disque"
         folder = ""; cf = ""; cs = 0; cw = 0; ch = 0
         sample_path = ""; paths = []
-        if info and info["has_cover_row"]:
+        ambiguous = False
+
+        if idx and len(idx["entries"]) > 1:
+            ambiguous = True
+            names = ", ".join(sorted(set(idx["albumartists"])))
+            raison = (f"⚠ titre ambigu ({len(idx['entries'])} albums différents : {names}) "
+                      "— correction désactivée, utiliser l'onglet Pochettes")
+            info = idx["entries"][0]
+            if info["has_cover_row"]:
+                cf = info["cover_format"]; cs = info["cover_size"]
+                cw = info["cover_width"]; ch = info["cover_height"]
+            # folder / sample_path / paths restent vides : jamais de correction depuis cette route
+        elif idx and idx["entries"][0]["has_cover_row"]:
+            info = idx["entries"][0]
             folder = info["folder"]; cf = info["cover_format"]; cs = info["cover_size"]
             cw = info["cover_width"]; ch = info["cover_height"]
             paths = info["paths"]
@@ -244,15 +297,51 @@ def cover_bluos_analysis(max_kb: int = 1000):
                 corrigeable = True; raison = f"grande ({cw}x{ch}, redimensionner)"
             else:
                 corrigeable = False; raison = f"pochette {cw}x{ch} {round(cs/1024)} Ko (non corrigeable ici)"
+
         out.append({
             "artist": x.get("artist", ""), "title": title, "status": x.get("status", ""),
             "corrigeable": corrigeable, "raison": raison, "folder": folder,
             "cover_format": cf, "cover_size": cs, "cover_width": cw, "cover_height": ch,
-            "sample_path": sample_path, "paths": paths,
+            "sample_path": sample_path, "paths": paths, "ambiguous": ambiguous,
         })
     nb_corr = sum(1 for o in out if o["corrigeable"])
     return {"player": bluos.get("player"), "total": len(fautifs),
             "corrigeables": nb_corr, "albums": out}
+
+
+@router.get("/albums")
+def cover_albums():
+    """Liste TOUTE la bibliotheque connue de master_scan.csv (pas seulement
+    les albums fautifs BluOS), groupee par (albumartist, album) -- la cle
+    correcte, sans ambiguite possible par construction. Ne renvoie PAS
+    paths[] : 5.9 MB avec paths[] contre 804 KB sans, pour 2158 albums, et
+    aucun gzip cote nginx pour absorber la difference. paths[] est
+    recupere a la demande via /album-paths, uniquement pour l'album ouvert
+    en apercu."""
+    by_key = _scan_master_csv()
+    out = []
+    for (albart, alb), e in by_key.items():
+        paths = e["paths"]
+        out.append({
+            "albumartist": albart, "album": alb, "folder": e["folder"],
+            "cover_format": e["cover_format"], "cover_size": e["cover_size"],
+            "cover_width": e["cover_width"], "cover_height": e["cover_height"],
+            "sample_path": paths[0] if paths else "",
+            "nb_tracks": len(paths),
+        })
+    return {"total": len(out), "albums": out}
+
+
+@router.get("/album-paths")
+def cover_album_paths(albumartist: str = "", album: str = ""):
+    """Chemins absolus (paths[], pour only_paths) d'un album precis,
+    identifie par (albumartist, album). Recupere a la demande par la
+    modale d'apercu quand /albums ne les a pas fournis en bloc."""
+    by_key = _scan_master_csv()
+    entry = by_key.get((albumartist, album))
+    if not entry:
+        raise HTTPException(status_code=404, detail="album introuvable")
+    return {"paths": entry["paths"]}
 
 
 @router.get("/thumbnail")
