@@ -1,5 +1,5 @@
 # =============================================================================
-# ZimaCompare v19 — image AIO (All-In-One)
+# ZimaCompare v20 — image AIO (All-In-One)
 # S6-Overlay (PID 1) supervise : rclone + uvicorn + nginx dans un seul conteneur.
 # Build sur la Zima : DOCKER_BUILDKIT=0 docker build -t ghcr.io/musitoul-blip/zimacompare-aio:v7 .
 #
@@ -88,5 +88,5 @@ ARG BUILD_DATE=unknown
 ARG IMAGE_TAG=unknown
 ENV BUILD_GIT_DESCRIBE=$GIT_DESCRIBE BUILD_GIT_BRANCH=$GIT_BRANCH BUILD_DATE=$BUILD_DATE BUILD_IMAGE_TAG=$IMAGE_TAG
 
-EXPOSE 8519
+EXPOSE 8516
 ENTRYPOINT ["/init"]
