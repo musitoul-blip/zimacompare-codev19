@@ -27,7 +27,20 @@ import pandas as pd
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 from collections import defaultdict
-from core import logger, config
+from core import logger, config, db
+
+# [LOT v20-3] Colonnes de la table SQLite tracks, dans l'ordre du CSV (id exclu).
+# Duplique la liste deja presente dans engine/scanner.py/fingerprint_sqlite.py --
+# dette de consolidation assumee, notee pour le nettoyage du LOT v20-7.
+SQLITE_COLUMNS = [
+    'filepath', 'filename', 'extension', 'directory', 'parent_folder',
+    'size_mb', 'modified_date', 'file_md5', 'title', 'artist', 'album', 'albumartist',
+    'composer', 'genre', 'year', 'track', 'tracktotal', 'disc', 'disctotal',
+    'encoder', 'duration', 'duration_seconds', 'bitrate', 'samplerate',
+    'channels', 'bitdepth', 'codec', 'id3_version', 'has_cover',
+    'cover_size', 'cover_format', 'cover_width', 'cover_height',
+    'cover_md5', 'cover_valid', 'cover_error', 'cover_count', 'error'
+]
 
 
 class AuditEngine:
@@ -82,22 +95,20 @@ class AuditEngine:
                 self.df[col] = self.df[col].fillna('').astype(str)
     
     def load_data(self) -> bool:
-        """Charge les données du CSV"""
+        """Charge les données depuis SQLite (master_scan.db) -- LOT v20-3"""
         if self.csv_path is None:
             return self.df is not None
-        
+
         try:
-            self.df = pd.read_csv(
-                self.csv_path, 
-                sep=config.CSV_SEPARATOR,
-                encoding=config.CSV_ENCODING,
-                low_memory=False
-            )
+            conn = db.connect()
+            cols = ",".join(SQLITE_COLUMNS)
+            self.df = pd.read_sql(f"SELECT {cols} FROM tracks ORDER BY id", conn)
+            conn.close()
             self._preprocess_dataframe()
-            logger.info(f"Données chargées: {len(self.df)} lignes")
+            logger.info(f"Données chargées (SQLite): {len(self.df)} lignes")
             return True
         except Exception as e:
-            logger.error(f"Erreur chargement CSV: {e}")
+            logger.error(f"Erreur chargement SQLite: {e}")
             return False
     
     def run_all_audits(self) -> Dict[str, pd.DataFrame]:
