@@ -1,8 +1,8 @@
 import base64
-import csv
 import io
 import os
 import shutil
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -13,6 +13,13 @@ from PIL import Image
 
 import compressor
 from bluos_scanner import bluos_results
+
+# [LOT v20-4a] Meme pattern T1-safe que compressor.py (module hors du package
+# tagaudit, doit s'inserer explicitement dans sys.path -- ne pas se fier a
+# l'effet de bord de "import compressor" fait juste au-dessus).
+if "/app/tagaudit" not in sys.path:
+    sys.path.insert(0, "/app/tagaudit")
+from core import db
 
 router = APIRouter(prefix="/api/cover")
 
@@ -173,59 +180,64 @@ def cover_consistency():
 
 
 def _scan_master_csv():
-    """Lit master_scan.csv et regroupe les pistes par (albumartist, album) --
-    la seule cle correcte a l'echelle de la bibliotheque (LOT 8 : `artist`
-    est un tag PAR PISTE dans cette bibliotheque -- le regrouper fragmente
-    un album en dizaines de faux groupes, 19689 vs 2158 mesures sur
-    master_scan.csv ; `albumartist` est rempli sur 100% des lignes et donne
-    le bon compte). Utilisee par /bluos/analysis (via _index_by_title),
-    /api/cover/albums et /api/cover/album-paths.
+    """Lit la table SQLite `tracks` (master_scan.db) et regroupe les pistes
+    par (albumartist, album) -- la seule cle correcte a l'echelle de la
+    bibliotheque (LOT 8 : `artist` est un tag PAR PISTE dans cette
+    bibliotheque -- le regrouper fragmente un album en dizaines de faux
+    groupes, 19689 vs 2158 mesures). Utilisee par /bluos/analysis (via
+    _index_by_title), /api/cover/albums et /api/cover/album-paths.
     Retourne dict[(albumartist, album)] -> {albumartist, album, folder,
     cover_format, cover_size, cover_width, cover_height, paths[],
-    has_cover_row}. Ne leve jamais ; dict vide si master_scan.csv
-    introuvable/illisible."""
-    csv_path = compressor._tagcfg.master_csv_path
+    has_cover_row}. Ne leve jamais ; dict vide si master_scan.db
+    introuvable/illisible.
+
+    [LOT v20-4a] Nom de fonction conserve a l'identique (seul le point de
+    lecture bascule, cf. "un lot = un changement") -- lit desormais
+    master_scan.db via core.db, plus master_scan.csv. Le sniffing de
+    delimiteur/colonnes CSV (noms et casse variables) disparait : le schema
+    SQL est fixe et connu, plus besoin de deviner quelle colonne existe.
+    L'algorithme de regroupement (first-wins sur has_cover, paths[] dans
+    l'ordre) est repris a l'identique -- seule la source des lignes change.
+    """
     by_key = {}
-    if not csv_path.exists():
-        return by_key
     try:
-        with open(str(csv_path), "r", encoding="utf-8", newline="", errors="replace") as f:
-            sample = f.read(4096); f.seek(0)
-            delim = compressor._sniff_delimiter(sample)
-            rd = csv.DictReader(f, delimiter=delim)
-            lm = {n.lower(): n for n in (rd.fieldnames or [])}
-            c_albart = lm.get("albumartist")
-            c_alb = lm.get("album"); c_fp = lm.get("filepath") or lm.get("path")
-            c_has = lm.get("has_cover"); c_fmt = lm.get("cover_format")
-            c_sz = lm.get("cover_size"); c_w = lm.get("cover_width"); c_h = lm.get("cover_height")
-            for row in rd:
-                alb = (row.get(c_alb) if c_alb else "") or ""
-                if not alb:
-                    continue
-                albart = (row.get(c_albart) if c_albart else "") or ""
-                fp = row.get(c_fp) if c_fp else ""
-                entry = by_key.setdefault((albart, alb), {
-                    "albumartist": albart, "album": alb,
-                    "folder": "", "cover_format": "", "cover_size": 0,
-                    "cover_width": 0, "cover_height": 0,
-                    "paths": [], "has_cover_row": False,
-                })
-                if fp:
-                    entry["paths"].append(fp)
-                has = (row.get(c_has, "") if c_has else "").strip().lower() in ("yes", "true", "1")
-                if has and not entry["has_cover_row"]:
-                    try:
-                        sz = int(float(row.get(c_sz) or 0))
-                    except Exception:
-                        sz = 0
-                    entry["folder"] = os.path.dirname(fp) if fp else ""
-                    entry["cover_format"] = (row.get(c_fmt) if c_fmt else "") or ""
-                    entry["cover_size"] = sz
-                    entry["cover_width"] = int(float(row.get(c_w) or 0)) if c_w else 0
-                    entry["cover_height"] = int(float(row.get(c_h) or 0)) if c_h else 0
-                    entry["has_cover_row"] = True
+        conn = db.connect()
+        try:
+            rows = conn.execute(
+                "SELECT albumartist, album, filepath, has_cover, cover_format, "
+                "cover_size, cover_width, cover_height FROM tracks ORDER BY id"
+            ).fetchall()
+        finally:
+            conn.close()
     except Exception:
-        pass
+        return by_key
+
+    for row in rows:
+        alb = row["album"] or ""
+        if not alb:
+            continue
+        albart = row["albumartist"] or ""
+        fp = row["filepath"] or ""
+        entry = by_key.setdefault((albart, alb), {
+            "albumartist": albart, "album": alb,
+            "folder": "", "cover_format": "", "cover_size": 0,
+            "cover_width": 0, "cover_height": 0,
+            "paths": [], "has_cover_row": False,
+        })
+        if fp:
+            entry["paths"].append(fp)
+        has = (row["has_cover"] or "").strip().lower() in ("yes", "true", "1")
+        if has and not entry["has_cover_row"]:
+            try:
+                sz = int(float(row["cover_size"] or 0))
+            except Exception:
+                sz = 0
+            entry["folder"] = os.path.dirname(fp) if fp else ""
+            entry["cover_format"] = row["cover_format"] or ""
+            entry["cover_size"] = sz
+            entry["cover_width"] = int(float(row["cover_width"] or 0))
+            entry["cover_height"] = int(float(row["cover_height"] or 0))
+            entry["has_cover_row"] = True
     return by_key
 
 
