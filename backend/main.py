@@ -351,25 +351,36 @@ def api_bluos_param_set(param_key: str, body: BluosParamBody):
 @app.get("/api/bluos/check-path")
 def api_bluos_check_path(path: str):
     """Coche verte stricte : le dossier est-il present (comme prefixe) dans
-    master_scan.csv ? Renvoie {in_csv, matched_dirs}."""
-    import csv as _csv, os as _os
-    from bluos_scanner import _master_csv_default
+    master_scan.db (table tracks) ? Renvoie {in_csv, matched_dirs}.
+
+    [LOT v20-5b] Requete de plage indexee (idx_tracks_directory) au lieu du
+    csv.DictReader -- meme technique que v20-4b (evite LIKE et l'echappement
+    des caracteres speciaux _ et %, `path` venant de l'utilisateur). Match
+    de prefixe SANS frontiere de separateur, reproduit a l'identique du
+    comportement CSV existant (d.startswith(p) nu -- pas de garde boundary
+    ici, contrairement a compressor.py::load_candidate_files).
+    """
+    from tagaudit.core import db
     p = (path or "").strip()
     if not p:
         return {"in_csv": False, "matched_dirs": 0, "csv": ""}
-    csv_path = _master_csv_default()
-    if not _os.path.isfile(csv_path):
-        return {"in_csv": False, "matched_dirs": 0, "csv": csv_path}
-    seen = set()
+    if not os.path.isfile(db.DB_PATH):
+        return {"in_csv": False, "matched_dirs": 0, "csv": db.DB_PATH}
     try:
-        with open(csv_path, "r", encoding="utf-8", newline="") as fh:
-            for row in _csv.DictReader(fh, delimiter=";"):
-                d = row.get("directory") or ""
-                if d and d.startswith(p):
-                    seen.add(d)
+        conn = db.connect()
+        try:
+            prefix_upper = p[:-1] + chr(ord(p[-1]) + 1)
+            rows = conn.execute(
+                "SELECT DISTINCT directory FROM tracks "
+                "WHERE directory = ? OR (directory >= ? AND directory < ?)",
+                (p, p, prefix_upper),
+            ).fetchall()
+        finally:
+            conn.close()
     except Exception as e:
-        raise HTTPException(500, f"Lecture master_scan.csv: {e}")
-    return {"in_csv": len(seen) > 0, "matched_dirs": len(seen), "csv": csv_path}
+        raise HTTPException(500, f"Lecture master_scan.db: {e}")
+    seen = {r["directory"] for r in rows if r["directory"]}
+    return {"in_csv": len(seen) > 0, "matched_dirs": len(seen), "csv": db.DB_PATH}
 
 @app.post("/api/audit-params/{param_key}")
 def api_audit_param_set(param_key: str, body: AuditParamBody):
