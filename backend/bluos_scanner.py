@@ -648,39 +648,58 @@ def _win_path(linux_path):
 
 def diagnose_from_csv(csv_path=None, network_results=None, params=None,
                       log=_default_log, stop_event=None, progress_cb=None):
-    """Volet B optimisé : diagnostic depuis master_scan.csv (embedded déjà
-    scanné) + check FS léger (os.listdir) pour les pochettes externes.
+    """Volet B optimisé : diagnostic depuis la table SQLite `tracks`
+    (master_scan.db, embedded déjà scanné) + check FS léger (os.listdir)
+    pour les pochettes externes.
 
     Renvoie la même structure que scan_local_folders. Ne re-scanne pas les
-    fichiers audio (pas de mutagen) : lit les colonnes cover_* du CSV.
+    fichiers audio (pas de mutagen) : lit les colonnes cover_* de `tracks`.
+
+    [LOT v20-5a] Lit désormais master_scan.db via core.db, plus
+    master_scan.csv. Le paramètre csv_path est conservé pour compatibilité
+    de signature mais n'est plus exploité (source SQLite unique désormais) --
+    aucun appelant ne le passe avec une valeur non-None dans ce dépôt
+    (vérifié par grep).
     """
-    import csv as _csv
+    import sys as _sys
+    if "/app/tagaudit" not in _sys.path:
+        _sys.path.insert(0, "/app/tagaudit")
+    from core import db
+
     if params is None:
         params = _load_params()
     embedded_max_bytes = params["embedded_max_bytes"]
     external_autoresize_min = params["external_autoresize_min"]
     external_autoresize_max = params["external_autoresize_max"]
 
-    csv_path = csv_path or _master_csv_default()
-    if not os.path.isfile(csv_path):
-        raise RuntimeError(f"master_scan.csv introuvable : {csv_path!r}")
+    if not os.path.isfile(db.DB_PATH):
+        raise RuntimeError(f"master_scan.db introuvable : {db.DB_PATH!r}")
 
-    # 1) Regrouper les lignes du CSV par dossier (directory)
+    conn = db.connect()
+    try:
+        sql_rows = conn.execute(
+            "SELECT directory, has_cover, cover_format, cover_size, cover_md5, "
+            "cover_width, cover_height, cover_count FROM tracks ORDER BY id"
+        ).fetchall()
+    finally:
+        conn.close()
+
+    # 1) Regrouper les lignes par dossier (directory) -- variable "sql_rows"
+    # distincte de "rows" (nom deja utilise plus bas pour la sous-liste par
+    # dossier, for dirpath, rows in by_dir.items()) : evite toute confusion.
     by_dir = {}
-    with open(csv_path, "r", encoding="utf-8", newline="") as fh:
-        rd = _csv.DictReader(fh, delimiter=";")
-        for row in rd:
-            d = row.get("directory") or ""
-            if not d:
-                continue
-            by_dir.setdefault(d, []).append(row)
+    for row in sql_rows:
+        d = row["directory"] or ""
+        if not d:
+            continue
+        by_dir.setdefault(d, []).append(row)
 
-    log(f"  ... {len(by_dir)} dossier(s) dans master_scan.csv")
+    log(f"  ... {len(by_dir)} dossier(s) dans master_scan.db")
     results = []
     done = 0
     for dirpath, rows in by_dir.items():
         if stop_event is not None and stop_event.is_set():
-            log("  ... diagnostic CSV interrompu par l'utilisateur.")
+            log("  ... diagnostic SQL interrompu par l'utilisateur.")
             break
         done += 1
         if progress_cb is not None and done % 25 == 0:
@@ -691,20 +710,20 @@ def diagnose_from_csv(csv_path=None, network_results=None, params=None,
                  "cover_format": "", "cover_size": 0, "cover_width": 0,
                  "cover_height": 0, "cover_count": 0, "distinct_covers": 0}
 
-        # -- Embedded (depuis CSV) --
+        # -- Embedded (depuis SQLite) --
         md5s = set()
         fmt_reported = False
         size_reported = False
         for row in rows:
-            has = (row.get("has_cover") or "").strip().lower()
+            has = (row["has_cover"] or "").strip().lower()
             if has not in ("yes", "true", "1"):
                 continue
-            cfmt = _norm_cover_format(row.get("cover_format"))
+            cfmt = _norm_cover_format(row["cover_format"])
             try:
-                csize = int(float(row.get("cover_size") or 0))
+                csize = int(float(row["cover_size"] or 0))
             except (TypeError, ValueError):
                 csize = 0
-            cmd5 = (row.get("cover_md5") or "").strip()
+            cmd5 = (row["cover_md5"] or "").strip()
             if cmd5:
                 md5s.add(cmd5)
             # Metadonnees pochette (1re piste avec cover fait foi pour l'affichage)
@@ -712,12 +731,12 @@ def diagnose_from_csv(csv_path=None, network_results=None, params=None,
                 entry["cover_format"] = cfmt
                 entry["cover_size"] = csize
                 try:
-                    entry["cover_width"] = int(float(row.get("cover_width") or 0))
-                    entry["cover_height"] = int(float(row.get("cover_height") or 0))
+                    entry["cover_width"] = int(float(row["cover_width"] or 0))
+                    entry["cover_height"] = int(float(row["cover_height"] or 0))
                 except (TypeError, ValueError):
                     pass
                 try:
-                    entry["cover_count"] = int(float(row.get("cover_count") or 0))
+                    entry["cover_count"] = int(float(row["cover_count"] or 0))
                 except (TypeError, ValueError):
                     pass
             if cfmt and cfmt not in ("JPEG", "PNG") and not fmt_reported:
@@ -789,7 +808,7 @@ def diagnose_from_csv(csv_path=None, network_results=None, params=None,
 
     if network_results:
         results = cross_reference(network_results, results)
-    log(f"  ... {len(results)} dossier(s) avec un diagnostic (via CSV).")
+    log(f"  ... {len(results)} dossier(s) avec un diagnostic (via SQLite).")
     return results
 
 
@@ -799,27 +818,36 @@ def diagnose_library(source_path=None, network_results=None, log=_default_log,
     """Volet B : diagnostique la bibliothèque. Renvoie la liste des dossiers
     avec un problème (issues/notes). Croise avec network_results si fourni.
 
-    Lot 4 : bascule automatiquement sur master_scan.csv s'il existe (rapide,
+    Lot 4 : bascule automatiquement sur master_scan.db s'il existe (rapide,
     embedded déjà scanné + check FS léger pour l'externe). Fallback os.walk
-    si pas de CSV ou use_csv=False.
-    """
-    params = _load_params()
-    the_csv = csv_path or _master_csv_default()
-    csv_ok = os.path.isfile(the_csv)
+    si pas de base ou use_csv=False.
 
-    # Décision CSV vs os.walk
+    [LOT v20-5a] csv_path/use_csv conservés pour compatibilité de signature
+    (aucun appelant ne les surcharge dans ce dépôt, vérifié par grep) --
+    la décision se fait désormais sur la présence de master_scan.db, pas
+    du CSV.
+    """
+    import sys as _sys
+    if "/app/tagaudit" not in _sys.path:
+        _sys.path.insert(0, "/app/tagaudit")
+    from core import db
+
+    params = _load_params()
+    db_ok = os.path.isfile(db.DB_PATH)
+
+    # Décision SQLite vs os.walk
     if use_csv is None:
-        use_csv = csv_ok
-    if use_csv and csv_ok:
-        log(f"Diagnostic via master_scan.csv : {the_csv}")
-        return diagnose_from_csv(csv_path=the_csv, network_results=network_results,
+        use_csv = db_ok
+    if use_csv and db_ok:
+        log(f"Diagnostic via master_scan.db : {db.DB_PATH}")
+        return diagnose_from_csv(network_results=network_results,
                                  params=params, log=log, stop_event=stop_event,
                                  progress_cb=progress_cb)
 
     # Fallback : scan filesystem complet (ancien comportement)
     if not source_path or not os.path.isdir(source_path):
-        raise RuntimeError(f"Chemin introuvable et pas de CSV : {source_path!r}")
-    log(f"Scan du dossier local '{source_path}' (os.walk, pas de CSV)...")
+        raise RuntimeError(f"Chemin introuvable et pas de base master_scan.db : {source_path!r}")
+    log(f"Scan du dossier local '{source_path}' (os.walk, pas de base)...")
     folder_results = scan_local_folders(source_path, params, log=log,
                                         stop_event=stop_event, progress_cb=progress_cb)
     if network_results:
