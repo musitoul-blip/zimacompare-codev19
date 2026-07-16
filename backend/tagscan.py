@@ -161,49 +161,43 @@ def stop_tag_scan():
     return False
 
 
-def _master_csv_path():
-    p = Path("/app_data/tagaudit/data/master_scan.csv")
-    try:
-        if "/app/tagaudit" not in sys.path:
-            sys.path.insert(0, "/app/tagaudit")
-        from core import config as tagcfg
-        p = Path(tagcfg.master_csv_path)
-    except Exception:
-        pass
-    return p
-
-
 def tag_result_info():
-    p = _master_csv_path()
-    if not p.exists():
-        return {"exists": False, "rows": 0, "path": str(p)}
-    rows = 0
+    """[LOT v20-5c] Statistiques depuis la table SQLite tracks (master_scan.db).
+
+    _master_csv_path() supprimee (aucun autre appelant, verifie par grep) --
+    repliee directement ici. Simplification actee : l'ancien double-repli
+    CSV (parsing structure -> comptage brut de lignes si echec) n'a plus de
+    sens sur une requete SQL bien formee -- une exception ici est une vraie
+    erreur (base corrompue, schema absent), pas un cas a masquer
+    silencieusement derriere un comptage degrade.
+    """
+    if "/app/tagaudit" not in sys.path:
+        sys.path.insert(0, "/app/tagaudit")
+    from core import db
+
+    db_path = Path(db.DB_PATH)
+    if not db_path.exists():
+        return {"exists": False, "rows": 0, "path": str(db_path)}
+
     by = {"mp3": 0, "flac": 0, "m4a": 0, "autre": 0}
+    conn = db.connect()
     try:
-        import csv as _csv
-        with open(p, "r", encoding="utf-8", newline="") as f:
-            rd = _csv.reader(f, delimiter=";")
-            header = next(rd, [])
-            ix = header.index("extension") if "extension" in header else 2
-            for row in rd:
-                rows += 1
-                ext = row[ix].lower() if len(row) > ix else ""
-                if ext in by:
-                    by[ext] += 1
-                else:
-                    by["autre"] += 1
-    except Exception:
-        try:
-            with open(p, "r", encoding="utf-8") as f:
-                rows = max(0, sum(1 for _ in f) - 1)
-        except Exception:
-            pass
+        rows = conn.execute("SELECT COUNT(*) AS n FROM tracks").fetchone()["n"]
+        for row in conn.execute("SELECT extension, COUNT(*) AS n FROM tracks GROUP BY extension"):
+            ext = (row["extension"] or "").lower()
+            if ext in by:
+                by[ext] += row["n"]
+            else:
+                by["autre"] += row["n"]
+    finally:
+        conn.close()
+
     dur = 0.0
     if _meta["ended_at"] and _meta["started_at"] and _meta["ended_at"] > _meta["started_at"]:
         dur = round(_meta["ended_at"] - _meta["started_at"], 1)
     fps = round(rows / dur, 1) if dur > 0 else 0
-    return {"exists": True, "rows": rows, "path": str(p),
-            "mtime": p.stat().st_mtime, "by_format": by,
+    return {"exists": True, "rows": rows, "path": str(db_path),
+            "mtime": db_path.stat().st_mtime, "by_format": by,
             "duration_seconds": dur, "fps_avg": fps}
 
 
