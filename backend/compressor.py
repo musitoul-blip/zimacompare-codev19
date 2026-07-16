@@ -26,95 +26,101 @@ from mutagen.id3 import APIC
 
 if "/app/tagaudit" not in sys.path:
     sys.path.insert(0, "/app/tagaudit")
-from core import config as _tagcfg
+from core import db
 
 DATA_DIR = Path(os.environ.get("COVER_DATA_DIR", "./data")).resolve()
 RESULT_CSV = DATA_DIR / "cover_scan.csv"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-# Noms de colonnes possibles (insensible à la casse) pour le chemin du fichier
-# et l'album — élargir cette liste si votre CSV utilise d'autres intitulés.
-PATH_COL_CANDIDATES = ["path", "filepath", "file_path", "file"]
-ALBUM_COL_CANDIDATES = ["album", "tag_album", "albumname"]
+
+def _prefix_upper_bound(s: str) -> str:
+    """[LOT v20-4b] Borne haute exclusive pour une requete de plage sur
+    prefixe de chemin (evite LIKE et l'echappement des caracteres speciaux
+    _ et %)."""
+    if not s:
+        return s
+    return s[:-1] + chr(ord(s[-1]) + 1)
 
 
-def _sniff_delimiter(sample: str) -> str:
-    try:
-        return csv.Sniffer().sniff(sample, delimiters=";,\t").delimiter
-    except Exception:
-        return ";" if sample.count(";") >= sample.count(",") else ","
-
-
-def load_candidate_files(source: str) -> Tuple[List[dict], Optional[str]]:
+def load_candidate_files(source: str, only_paths: Optional[set] = None) -> Tuple[List[dict], Optional[str]]:
     """
-    Charge la liste des fichiers à traiter depuis master_scan.csv (info déjà
-    connue de l'app principale) plutôt que de rescanner le disque nous-mêmes.
-    Filtre sur les chemins commençant par `source`.
+    Charge la liste des fichiers à traiter depuis la table SQLite `tracks`
+    (master_scan.db, info déjà connue de l'app principale) plutôt que de
+    rescanner le disque nous-mêmes.
 
-    Retourne (liste de {"path": Path, "album": str|None, ...métadonnées CSV
+    [LOT v20-4b] Si only_paths est fourni (cas systématique depuis le LOT 5c :
+    un seul appelant, only_paths toujours envoyé) : interroge directement ces
+    chemins via l'index UNIQUE filepath -- ne touche QUE les fichiers
+    demandés, pas tout le dossier source (plus correct aussi pour le cas
+    connu d'un dossier contenant plusieurs albums, LOT 5c). Sinon, filtre par
+    plage de préfixe sur `source` (comportement historique, boundary-safe :
+    "GoogleMusic" ne matche pas "GoogleMusicOLD" -- plage de préfixe indexée,
+    pas de LIKE à échapper).
+
+    Colonnes lues : filepath, album, cover_size, cover_format, cover_md5,
+    has_cover -- exhaustif (vérifié par grep de tous les accès row/entry
+    dans ce fichier). cover_width/cover_height ne sont PAS lues : déjà
+    absentes de la version CSV (référencées dans le shortcut de _run() mais
+    jamais peuplées ici), reproduit à l'identique pour ne pas changer le
+    déclenchement du shortcut.
+
+    Retourne (liste de {"path": Path, "album": str|None, ...métadonnées
     éventuelles}, message d'avertissement ou None).
 
-    Si master_scan.csv est introuvable ou illisible, repli automatique sur un
-    scan direct du dossier (le fichier fonctionne quand même, avec un
-    avertissement explicite plutôt qu'un échec silencieux).
+    Si master_scan.db/table tracks est introuvable ou illisible, repli
+    automatique sur un scan direct du dossier (le fichier fonctionne quand
+    même, avec un avertissement explicite plutôt qu'un échec silencieux).
     """
-    csv_path = _tagcfg.master_csv_path
-    if not csv_path.exists():
+    db_path = Path(db.DB_PATH)
+    if not db_path.exists():
         return (
             [{"path": p} for p in _iter_audio_files(Path(source))],
-            f"master_scan.csv introuvable ({csv_path}) — repli sur un scan direct du dossier.",
+            f"master_scan.db introuvable ({db_path}) — repli sur un scan direct du dossier.",
         )
 
     try:
-        with open(csv_path, "r", newline="", encoding="utf-8", errors="replace") as f:
-            sample = f.read(4096)
-            f.seek(0)
-            delim = _sniff_delimiter(sample)
-            reader = csv.DictReader(f, delimiter=delim)
-            if not reader.fieldnames:
-                raise ValueError("CSV vide ou sans en-tête")
+        conn = db.connect()
+        try:
+            cols = "filepath, album, cover_size, cover_format, cover_md5, has_cover"
+            if only_paths:
+                paths_list = list(only_paths)
+                placeholders = ",".join("?" for _ in paths_list)
+                rows = conn.execute(
+                    f"SELECT {cols} FROM tracks WHERE filepath IN ({placeholders}) ORDER BY id",
+                    paths_list,
+                ).fetchall()
+            else:
+                source_norm = os.path.normpath(str(Path(source)))
+                prefix = source_norm + os.sep
+                rows = conn.execute(
+                    f"SELECT {cols} FROM tracks WHERE filepath = ? "
+                    f"OR (filepath >= ? AND filepath < ?) ORDER BY id",
+                    (source_norm, prefix, _prefix_upper_bound(prefix)),
+                ).fetchall()
+        finally:
+            conn.close()
 
-            lower_map = {name.lower(): name for name in reader.fieldnames}
-            path_col = next((lower_map[c] for c in PATH_COL_CANDIDATES if c in lower_map), None)
-            if path_col is None:
-                raise ValueError(f"Aucune colonne de chemin reconnue parmi {reader.fieldnames}")
-            album_col = next((lower_map[c] for c in ALBUM_COL_CANDIDATES if c in lower_map), None)
-            # Colonnes déjà calculées par le scan principal — si présentes,
-            # elles permettent d'éviter de rouvrir les fichiers déjà conformes
-            # (voir optimisation dans _run()).
-            cover_size_col = lower_map.get("cover_size")
-            cover_format_col = lower_map.get("cover_format")
-            cover_md5_col = lower_map.get("cover_md5")
-            has_cover_col = lower_map.get("has_cover")
-
-            source_norm = os.path.normpath(str(Path(source)))
-            out = []
-            for row in reader:
-                p = row.get(path_col, "")
-                if not p:
-                    continue
-                p_norm = os.path.normpath(str(Path(p)))
-                # Respecte la frontière du chemin : "GoogleMusic" ne doit pas
-                # matcher "GoogleMusicOLD" (bug de startswith() nu corrigé).
-                if not (p_norm == source_norm or p_norm.startswith(source_norm + os.sep)):
-                    continue
-                if detect_filetype(Path(p)) is None:
-                    continue
-                entry = {"path": Path(p), "album": row.get(album_col) if album_col else None}
-                if cover_size_col and row.get(cover_size_col):
-                    entry["cover_size"] = row.get(cover_size_col)
-                if cover_format_col and row.get(cover_format_col):
-                    entry["cover_format"] = row.get(cover_format_col)
-                if cover_md5_col and row.get(cover_md5_col):
-                    entry["cover_md5"] = row.get(cover_md5_col)
-                if has_cover_col:
-                    entry["has_cover"] = row.get(has_cover_col)
-                out.append(entry)
-            return out, None
+        out = []
+        for row in rows:
+            p = row["filepath"] or ""
+            if not p:
+                continue
+            if detect_filetype(Path(p)) is None:
+                continue
+            entry = {"path": Path(p), "album": row["album"] or None}
+            if row["cover_size"]:
+                entry["cover_size"] = row["cover_size"]
+            if row["cover_format"]:
+                entry["cover_format"] = row["cover_format"]
+            if row["cover_md5"]:
+                entry["cover_md5"] = row["cover_md5"]
+            entry["has_cover"] = row["has_cover"] or ""
+            out.append(entry)
+        return out, None
     except Exception as e:
         return (
             [{"path": p} for p in _iter_audio_files(Path(source))],
-            f"Erreur de lecture de master_scan.csv ({csv_path}) : {e} — repli sur un scan direct du dossier.",
+            f"Erreur de lecture de master_scan.db ({db_path}) : {e} — repli sur un scan direct du dossier.",
         )
 
 CSV_FIELDS = [
@@ -368,10 +374,13 @@ def _iter_audio_files(root: Path):
 def _run(root: Path, params: dict, apply_write: bool):
     DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Récupère la liste des fichiers depuis master_scan.csv (info déjà connue
+    # Récupère la liste des fichiers depuis master_scan.db (info déjà connue
     # de l'app principale) plutôt que de rescanner le disque nous-mêmes.
-    candidates, warning = load_candidate_files(str(root))
+    # [LOT v20-4b] only_paths passé directement à load_candidate_files() --
+    # requête SQL ciblée (IN sur l'index UNIQUE filepath) au lieu de charger
+    # tout le dossier puis filtrer en Python après coup.
     only = params.get("only_paths")
+    candidates, warning = load_candidate_files(str(root), only_paths=only)
     if only:
         candidates = [c for c in candidates if os.path.normpath(str(c["path"])) in only]
     STATE.warning = warning or ""
