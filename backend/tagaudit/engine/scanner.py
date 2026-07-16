@@ -16,6 +16,7 @@ Corrections appliquées :
 """
 import os
 import csv
+import sqlite3
 import time
 import json
 import threading
@@ -23,7 +24,7 @@ from pathlib import Path
 from typing import List, Generator, Optional, Set
 from collections import deque
 from datetime import datetime
-from core import logger, config, state_manager
+from core import logger, config, state_manager, db
 from engine.smart_extractor import SmartExtractor
 
 
@@ -57,6 +58,9 @@ class BackgroundScanner:
         self._files_list: List[Path] = []
         # [27] Horodatage de la dernière mise à jour de state envoyée au manager
         self._last_state_update: float = 0.0
+        # [LOT v20-2] Connexion SQLite de la double écriture, une seule pour
+        # tout le scan (voir _init_csv/_flush_buffer_sqlite/_run_scan)
+        self._db_conn = None
         
     def prescan(self) -> int:
         """Pré-scan rapide pour compter les fichiers"""
@@ -218,7 +222,21 @@ class BackgroundScanner:
         
         # Final
         self._flush_buffer()
-        
+
+        # [LOT v20-2] Fermeture propre SQLite : checkpoint WAL explicite avant
+        # close() (garantit que les donnees sont dans master_scan.db, pas
+        # seulement -wal -- necessaire pour la Preuve A qui regenerera un CSV
+        # depuis ce fichier). S'execute que le scan finisse normalement ou
+        # soit arrete (_stop_event), les deux chemins passent par ici.
+        if self._db_conn is not None:
+            try:
+                self._db_conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                self._db_conn.close()
+            except Exception as e:
+                logger.error(f"[SQLITE] Erreur fermeture/checkpoint: {e}")
+            finally:
+                self._db_conn = None
+
         # [27] Force une dernière mise à jour de l'état pour garantir que
         # les compteurs finaux sont visibles côté UI, même si on a été
         # interrompu juste après un throttle.
@@ -301,29 +319,79 @@ class BackgroundScanner:
         csv_path = config.master_csv_path
         # Toujours recréer le fichier (écrase l'existant)
         with open(csv_path, 'w', newline='', encoding=config.CSV_ENCODING) as f:
-            writer = csv.DictWriter(f, fieldnames=self.CSV_COLUMNS, 
+            writer = csv.DictWriter(f, fieldnames=self.CSV_COLUMNS,
                                    delimiter=config.CSV_SEPARATOR)
             writer.writeheader()
         logger.info(f"CSV initialisé: {csv_path}")
-    
+
+        # [LOT v20-2] Double ecriture SQLite -- isolee : un echec ici ne doit
+        # JAMAIS empecher le CSV (deja ecrit ci-dessus) de fonctionner.
+        try:
+            db.init_schema()
+            self._db_conn = db.connect()
+            self._db_conn.execute("DELETE FROM tracks")
+            self._db_conn.commit()
+            logger.info(f"SQLite initialisé: {db.DB_PATH}")
+        except Exception as e:
+            logger.error(f"[SQLITE] Erreur init (double écriture désactivée pour ce scan): {e}")
+            self._db_conn = None
+
     def _flush_buffer(self):
         """Écrit le buffer dans le CSV"""
         if not self._buffer:
             return
-        
+
         try:
-            with open(config.master_csv_path, 'a', newline='', 
+            with open(config.master_csv_path, 'a', newline='',
                      encoding=config.CSV_ENCODING) as f:
                 writer = csv.DictWriter(f, fieldnames=self.CSV_COLUMNS,
                                        delimiter=config.CSV_SEPARATOR,
                                        extrasaction='ignore')
                 for row in self._buffer:
                     writer.writerow(row)
+
+            # [LOT v20-2] Double ecriture SQLite -- try/except propre, imbrique
+            # ICI : une exception SQLite ne doit jamais remonter jusqu'au except
+            # ci-dessous (qui parle du CSV) ni empecher buffer.clear().
+            self._flush_buffer_sqlite()
+
             self._buffer.clear()
             self._last_flush = time.time()
         except Exception as e:
             logger.error(f"Erreur flush CSV: {e}")
-    
+
+    def _flush_buffer_sqlite(self):
+        """[LOT v20-2] Ecrit le buffer dans SQLite, en plus du CSV.
+
+        Isolation totale : toute exception ici est capturee localement,
+        jamais propagee. Le CSV reste la source de verite pendant
+        v20-2 a v20-5 -- un echec SQLite partiel ne doit jamais interrompre
+        le scan ni degrader le CSV, seulement laisser SQLite en retard sur
+        ce batch (detectable ensuite par la Preuve A).
+        """
+        if self._db_conn is None:
+            return
+
+        # Normalisation ligne par ligne : csv.DictWriter convertit
+        # silencieusement None -> '' et stringifie tout via str() a
+        # l'ecriture. sqlite3 ne fait ni l'un ni l'autre -- decision figee
+        # reproduite ici explicitement.
+        rows = [
+            tuple('' if row.get(col) is None else str(row.get(col)) for col in self.CSV_COLUMNS)
+            for row in self._buffer
+        ]
+        columns = ','.join(self.CSV_COLUMNS)
+        placeholders = ','.join('?' for _ in self.CSV_COLUMNS)
+        sql = f"INSERT INTO tracks ({columns}) VALUES ({placeholders})"
+
+        try:
+            with self._db_conn:  # commit auto si OK, rollback auto si exception
+                self._db_conn.executemany(sql, rows)
+        except sqlite3.IntegrityError as e:
+            logger.error(f"[SQLITE] doublon filepath détecté (contrainte UNIQUE) : {e}")
+        except Exception as e:
+            logger.error(f"[SQLITE] Erreur flush SQLite: {e}")
+
     def _handle_signal(self, signum, frame):
         """Gère les signaux système (appelé depuis l'extérieur)"""
         logger.info(f"Signal {signum} reçu")
