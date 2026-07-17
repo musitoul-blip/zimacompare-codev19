@@ -15,8 +15,6 @@ Corrections appliquées :
        d'erreur.
 """
 import os
-import csv
-import sqlite3
 import time
 import json
 import threading
@@ -115,7 +113,10 @@ class BackgroundScanner:
             logger.error(f"Erreur scan: {e}")
             state_manager.update(status='error', last_error=str(e))
         finally:
-            self._flush_buffer()
+            try:
+                self._flush_buffer()
+            except Exception as e:
+                logger.error(f"[SCANNER] Échec du flush de secours (finally): {e}")
             logger.debug("[SCANNER] Libération lock")
             state_manager.release_lock()
         
@@ -315,65 +316,33 @@ class BackgroundScanner:
             yield entry
     
     def _init_csv(self):
-        """Initialise/Réinitialise le fichier CSV (écrase l'ancien)"""
-        csv_path = config.master_csv_path
-        # Toujours recréer le fichier (écrase l'existant)
-        with open(csv_path, 'w', newline='', encoding=config.CSV_ENCODING) as f:
-            writer = csv.DictWriter(f, fieldnames=self.CSV_COLUMNS,
-                                   delimiter=config.CSV_SEPARATOR)
-            writer.writeheader()
-        logger.info(f"CSV initialisé: {csv_path}")
-
-        # [LOT v20-2] Double ecriture SQLite -- isolee : un echec ici ne doit
-        # JAMAIS empecher le CSV (deja ecrit ci-dessus) de fonctionner.
-        try:
-            db.init_schema()
-            self._db_conn = db.connect()
-            self._db_conn.execute("DELETE FROM tracks")
-            self._db_conn.commit()
-            logger.info(f"SQLite initialisé: {db.DB_PATH}")
-        except Exception as e:
-            logger.error(f"[SQLITE] Erreur init (double écriture désactivée pour ce scan): {e}")
-            self._db_conn = None
+        """[LOT v20-6] Initialise la table SQLite tracks (ecrase l'ancienne).
+        Le CSV n'est plus ecrit -- master_scan.db est desormais l'unique
+        source. Un echec ici interrompt le scan (raise) : plus de CSV en
+        filet, un scan qui "reussit" sans donnees ecrites serait pire
+        qu'un echec visible."""
+        db.init_schema()
+        self._db_conn = db.connect()
+        self._db_conn.execute("DELETE FROM tracks")
+        self._db_conn.commit()
+        logger.info(f"SQLite initialisé: {db.DB_PATH}")
 
     def _flush_buffer(self):
-        """Écrit le buffer dans le CSV"""
+        """[LOT v20-6] Ecrit le buffer dans SQLite (CSV retire, coupure seche)."""
         if not self._buffer:
             return
 
-        try:
-            with open(config.master_csv_path, 'a', newline='',
-                     encoding=config.CSV_ENCODING) as f:
-                writer = csv.DictWriter(f, fieldnames=self.CSV_COLUMNS,
-                                       delimiter=config.CSV_SEPARATOR,
-                                       extrasaction='ignore')
-                for row in self._buffer:
-                    writer.writerow(row)
-
-            # [LOT v20-2] Double ecriture SQLite -- try/except propre, imbrique
-            # ICI : une exception SQLite ne doit jamais remonter jusqu'au except
-            # ci-dessous (qui parle du CSV) ni empecher buffer.clear().
-            self._flush_buffer_sqlite()
-
-            self._buffer.clear()
-            self._last_flush = time.time()
-        except Exception as e:
-            logger.error(f"Erreur flush CSV: {e}")
+        self._flush_buffer_sqlite()
+        self._buffer.clear()
+        self._last_flush = time.time()
 
     def _flush_buffer_sqlite(self):
-        """[LOT v20-2] Ecrit le buffer dans SQLite, en plus du CSV.
-
-        Isolation totale : toute exception ici est capturee localement,
-        jamais propagee. Le CSV reste la source de verite pendant
-        v20-2 a v20-5 -- un echec SQLite partiel ne doit jamais interrompre
-        le scan ni degrader le CSV, seulement laisser SQLite en retard sur
-        ce batch (detectable ensuite par la Preuve A).
+        """[LOT v20-6] Ecrit le buffer dans SQLite -- unique source depuis la
+        coupure du CSV. Un echec ici (y compris IntegrityError sur un
+        doublon filepath) interrompt le scan : plus de CSV en filet.
         """
-        if self._db_conn is None:
-            return
-
-        # Normalisation ligne par ligne : csv.DictWriter convertit
-        # silencieusement None -> '' et stringifie tout via str() a
+        # Normalisation ligne par ligne : le CSV convertissait
+        # silencieusement None -> '' et stringifiait tout via str() a
         # l'ecriture. sqlite3 ne fait ni l'un ni l'autre -- decision figee
         # reproduite ici explicitement.
         rows = [
@@ -384,13 +353,8 @@ class BackgroundScanner:
         placeholders = ','.join('?' for _ in self.CSV_COLUMNS)
         sql = f"INSERT INTO tracks ({columns}) VALUES ({placeholders})"
 
-        try:
-            with self._db_conn:  # commit auto si OK, rollback auto si exception
-                self._db_conn.executemany(sql, rows)
-        except sqlite3.IntegrityError as e:
-            logger.error(f"[SQLITE] doublon filepath détecté (contrainte UNIQUE) : {e}")
-        except Exception as e:
-            logger.error(f"[SQLITE] Erreur flush SQLite: {e}")
+        with self._db_conn:  # commit auto si OK, rollback auto si exception
+            self._db_conn.executemany(sql, rows)
 
     def _handle_signal(self, signum, frame):
         """Gère les signaux système (appelé depuis l'extérieur)"""
