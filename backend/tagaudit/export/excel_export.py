@@ -1262,8 +1262,13 @@ officiel, sous réserve d'évolution de l'outil.
         row += 5
 
         # === KPI CARDS ROW 2 ===
-        size_gb = round(df['size_mb'].sum() / 1024, 2) if 'size_mb' in df.columns else 0
-        duration_h = round(df['duration_seconds'].sum() / 3600, 1) \
+        # [LOT v20-5-fix, 2e copie] meme raison que audit_engine.py : size_mb/
+        # duration_seconds sont TEXT en SQLite, sum brut concatenait puis /N
+        # levait un TypeError -- avale silencieusement par le try/except de
+        # export() (L372-376), tronquant le Cockpit (et _ChartData, sheet2,
+        # qui en depend) sans exception visible.
+        size_gb = round(pd.to_numeric(df['size_mb'], errors='coerce').sum() / 1024, 2) if 'size_mb' in df.columns else 0
+        duration_h = round(pd.to_numeric(df['duration_seconds'], errors='coerce').sum() / 3600, 1) \
             if 'duration_seconds' in df.columns else 0
 
         with_cover = 0
