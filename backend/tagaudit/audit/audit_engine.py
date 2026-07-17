@@ -205,8 +205,12 @@ class AuditEngine:
             'Genres uniques': df['genre'].nunique() if 'genre' in df.columns else 0,
             'Avec pochette': (df['has_cover'] == 'Yes').sum() if 'has_cover' in df.columns else 0,
             'Sans pochette': (df['has_cover'] == 'No').sum() if 'has_cover' in df.columns else 0,
-            'Taille totale (GB)': round(df['size_mb'].sum() / 1024, 2) if 'size_mb' in df.columns else 0,
-            'Durée totale (h)': round(df['duration_seconds'].sum() / 3600, 2) if 'duration_seconds' in df.columns else 0,
+            # [LOT v20-5-fix] coercion numerique avant sum -- size_mb/duration_seconds
+            # sont TEXT en SQLite (schema tout-TEXT du v20-1), .sum() brut concatenait
+            # en chaine puis /1024 ou /3600 levait un TypeError (audit silencieusement
+            # remplace par un DataFrame vide par run_all_audits()).
+            'Taille totale (GB)': round(pd.to_numeric(df['size_mb'], errors='coerce').sum() / 1024, 2) if 'size_mb' in df.columns else 0,
+            'Durée totale (h)': round(pd.to_numeric(df['duration_seconds'], errors='coerce').sum() / 3600, 2) if 'duration_seconds' in df.columns else 0,
             'Bitrate moyen MP3': bitrate_avg,
             'Erreurs extraction': errors_count
         }
@@ -259,10 +263,13 @@ class AuditEngine:
         if 'albumartist' in df.columns:
             agg_dict['albumartist'] = 'nunique'
         if 'duration_seconds' in df.columns:
-            agg_dict['duration_seconds'] = 'sum'
+            # [LOT v20-5-fix] coercion inline (meme motif que le lambda disc
+            # au-dessus) -- size_mb/duration_seconds TEXT en SQLite, sum brut
+            # levait un TypeError.
+            agg_dict['duration_seconds'] = lambda x: pd.to_numeric(x, errors='coerce').sum()
         if 'size_mb' in df.columns:
-            agg_dict['size_mb'] = 'sum'
-        
+            agg_dict['size_mb'] = lambda x: pd.to_numeric(x, errors='coerce').sum()
+
         stats = df.groupby('genre').agg(agg_dict).reset_index()
         rename_map = {
             'genre': 'Genre', 'album': 'Albums', 'disc': 'Disques',
@@ -292,10 +299,13 @@ class AuditEngine:
         if 'codec' in df.columns:
             agg_dict['codec'] = lambda x: ', '.join(sorted(x.dropna().astype(str).unique()))
         if 'duration_seconds' in df.columns:
-            agg_dict['duration_seconds'] = 'sum'
+            # [LOT v20-5-fix] coercion inline (meme motif que le lambda codec
+            # au-dessus) -- size_mb/duration_seconds TEXT en SQLite, sum brut
+            # levait un TypeError.
+            agg_dict['duration_seconds'] = lambda x: pd.to_numeric(x, errors='coerce').sum()
         if 'size_mb' in df.columns:
-            agg_dict['size_mb'] = 'sum'
-        
+            agg_dict['size_mb'] = lambda x: pd.to_numeric(x, errors='coerce').sum()
+
         stats = df.groupby('albumartist').agg(agg_dict).reset_index()
         rename_map = {
             'albumartist': 'Album Artist', 'album': 'Albums',
@@ -1272,10 +1282,12 @@ class AuditEngine:
         
         agg_dict = {'filename': 'count'}
         if 'size_mb' in df.columns:
-            agg_dict['size_mb'] = 'sum'
+            # [LOT v20-5-fix] coercion inline -- size_mb/duration_seconds TEXT
+            # en SQLite, sum brut levait un TypeError.
+            agg_dict['size_mb'] = lambda x: pd.to_numeric(x, errors='coerce').sum()
         if 'duration_seconds' in df.columns:
-            agg_dict['duration_seconds'] = 'sum'
-        
+            agg_dict['duration_seconds'] = lambda x: pd.to_numeric(x, errors='coerce').sum()
+
         stats = df.groupby('genre').agg(agg_dict).reset_index()
         rename_map = {
             'genre': 'Genre', 'filename': 'Fichiers',
