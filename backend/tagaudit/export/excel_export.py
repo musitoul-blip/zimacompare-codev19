@@ -53,8 +53,22 @@ import shutil
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Optional, List, Tuple, Any
-from core import logger, config
+from core import logger, config, db
 from core import audit_registry  # T10 Lot F2
+
+# [LOT v20-5d] Colonnes de la table SQLite tracks, dans l'ordre du CSV (id
+# exclu). Duplique la liste deja presente dans engine/scanner.py/
+# fingerprint_sqlite.py/audit_engine.py -- dette de consolidation assumee,
+# notee pour le nettoyage du LOT v20-7. Reutilisee par html_export.py.
+SQLITE_COLUMNS = [
+    'filepath', 'filename', 'extension', 'directory', 'parent_folder',
+    'size_mb', 'modified_date', 'file_md5', 'title', 'artist', 'album', 'albumartist',
+    'composer', 'genre', 'year', 'track', 'tracktotal', 'disc', 'disctotal',
+    'encoder', 'duration', 'duration_seconds', 'bitrate', 'samplerate',
+    'channels', 'bitdepth', 'codec', 'id3_version', 'has_cover',
+    'cover_size', 'cover_format', 'cover_width', 'cover_height',
+    'cover_md5', 'cover_valid', 'cover_error', 'cover_count', 'error'
+]
 
 
 class ExcelExporter:
@@ -249,20 +263,21 @@ class ExcelExporter:
         # Crée le dossier parent (le sous-répertoire horodaté)
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # --- Chargement du CSV ---
-        csv_path = config.master_csv_path
-        if not csv_path.exists():
-            logger.error("Fichier master_scan.csv introuvable")
-            raise FileNotFoundError(f"CSV non trouvé: {csv_path}")
+        # --- Chargement depuis SQLite (LOT v20-5d) ---
+        db_path = Path(db.DB_PATH)
+        if not db_path.exists():
+            logger.error("Base master_scan.db introuvable")
+            raise FileNotFoundError(f"Base non trouvée: {db_path}")
 
-        # low_memory=False évite les warnings de types mixtes sur gros CSV
-        self.df_main = pd.read_csv(
-            csv_path,
-            sep=config.CSV_SEPARATOR,
-            encoding=config.CSV_ENCODING,
-            low_memory=False,
-        )
-        logger.info(f"Chargé {len(self.df_main)} lignes depuis {csv_path}")
+        conn = db.connect()
+        try:
+            self.df_main = pd.read_sql(
+                "SELECT " + ",".join(SQLITE_COLUMNS) + " FROM tracks ORDER BY id",
+                conn,
+            )
+        finally:
+            conn.close()
+        logger.info(f"Chargé {len(self.df_main)} lignes depuis {db_path}")
 
         # --- Audits ---
         from audit import AuditEngine

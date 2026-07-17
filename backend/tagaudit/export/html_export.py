@@ -19,7 +19,6 @@ from pathlib import Path as _Path
 from urllib.parse import quote
 import pandas as pd
 from datetime import datetime
-from core import config
 from core import audit_registry  # T10 Lot F2
 
 ROW_CAP = 800
@@ -49,13 +48,23 @@ GROUP_LABELS = {
 # Donnees (reutilise ExcelExporter pour l'enrichissement)
 # ----------------------------------------------------------------------
 def _prepare():
-    from export.excel_export import ExcelExporter
+    """[LOT v20-5e] Charge depuis SQLite (master_scan.db) au lieu du CSV.
+    SQLITE_COLUMNS reutilise depuis excel_export.py (import deja present
+    sur cette meme ligne) -- evite une duplication de plus de la liste."""
+    from export.excel_export import ExcelExporter, SQLITE_COLUMNS
     from audit import AuditEngine
-    csv_path = config.master_csv_path
-    if not csv_path.exists():
-        raise FileNotFoundError("master_scan.csv introuvable: %s" % csv_path)
-    df = pd.read_csv(csv_path, sep=config.CSV_SEPARATOR,
-                     encoding=config.CSV_ENCODING, low_memory=False)
+    from core import db
+    db_path = _Path(db.DB_PATH)
+    if not db_path.exists():
+        raise FileNotFoundError("master_scan.db introuvable: %s" % db_path)
+    conn = db.connect()
+    try:
+        df = pd.read_sql(
+            "SELECT " + ",".join(SQLITE_COLUMNS) + " FROM tracks ORDER BY id",
+            conn,
+        )
+    finally:
+        conn.close()
     exp = ExcelExporter()
     exp.df_main = df
     exp.audit_results = AuditEngine(df).run_all_audits()
