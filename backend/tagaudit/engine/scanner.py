@@ -112,6 +112,18 @@ class BackgroundScanner:
         except Exception as e:
             logger.error(f"Erreur scan: {e}")
             state_manager.update(status='error', last_error=str(e))
+            # [LOT v20-7a] scan_meta : marquage 'failed' explicite, connexion
+            # NEUVE et courte (self._db_conn peut etre dans un etat incertain
+            # selon ou le "plante fort" a eu lieu) -- best-effort, isole,
+            # ne remonte jamais (ne doit pas masquer l'exception d'origine,
+            # deja loggee/enregistree juste au-dessus).
+            try:
+                _conn = db.connect()
+                _conn.execute("UPDATE scan_meta SET last_scan_status='failed' WHERE id=1")
+                _conn.commit()
+                _conn.close()
+            except Exception as e2:
+                logger.error(f"[SQLITE] Erreur marquage scan_meta failed: {e2}")
         finally:
             try:
                 self._flush_buffer()
@@ -224,6 +236,24 @@ class BackgroundScanner:
         # Final
         self._flush_buffer()
 
+        final_status = 'completed' if not self._stop_event.is_set() else 'paused'
+
+        # [LOT v20-7a] scan_meta : marque la fin du scan, AVANT le checkpoint
+        # WAL (meme connexion self._db_conn, buffer deja vide -- COUNT(*)
+        # reflete bien toutes les tracks). Try/except non fatal et isole,
+        # meme raison qu'au debut.
+        if self._db_conn is not None:
+            try:
+                count = self._db_conn.execute("SELECT COUNT(*) FROM tracks").fetchone()[0]
+                self._db_conn.execute(
+                    "UPDATE scan_meta SET last_scan_status=?, last_scan_completed=?, "
+                    "last_scan_count=? WHERE id=1",
+                    (final_status, datetime.now().isoformat(), count)
+                )
+                self._db_conn.commit()
+            except Exception as e:
+                logger.error(f"[SQLITE] Erreur ecriture scan_meta (fin): {e}")
+
         # [LOT v20-2] Fermeture propre SQLite : checkpoint WAL explicite avant
         # close() (garantit que les donnees sont dans master_scan.db, pas
         # seulement -wal -- necessaire pour la Preuve A qui regenerera un CSV
@@ -242,7 +272,6 @@ class BackgroundScanner:
         # les compteurs finaux sont visibles côté UI, même si on a été
         # interrompu juste après un throttle.
         elapsed = time.time() - start
-        final_status = 'completed' if not self._stop_event.is_set() else 'paused'
         state_manager.update(
             status=final_status,
             processed_files=processed,
@@ -326,6 +355,20 @@ class BackgroundScanner:
         self._db_conn.execute("DELETE FROM tracks")
         self._db_conn.commit()
         logger.info(f"SQLite initialisé: {db.DB_PATH}")
+
+        # [LOT v20-7a] scan_meta : marque le debut du scan. Try/except non
+        # fatal et isole -- une erreur ici ne doit JAMAIS empecher le scan
+        # de tracks (perdre un horodatage de bookkeeping n'est pas grave,
+        # perdre des donnees d'audit l'est).
+        try:
+            self._db_conn.execute(
+                "UPDATE scan_meta SET last_scan_started=?, last_scan_status='running', "
+                "last_scan_completed=NULL WHERE id=1",
+                (datetime.now().isoformat(),)
+            )
+            self._db_conn.commit()
+        except Exception as e:
+            logger.error(f"[SQLITE] Erreur ecriture scan_meta (debut): {e}")
 
     def _flush_buffer(self):
         """[LOT v20-6] Ecrit le buffer dans SQLite (CSV retire, coupure seche)."""

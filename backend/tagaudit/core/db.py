@@ -33,6 +33,14 @@ CREATE TABLE IF NOT EXISTS tracks (
     cover_size        TEXT, cover_format TEXT, cover_width TEXT, cover_height TEXT,
     cover_md5         TEXT, cover_valid TEXT, cover_error TEXT, cover_count TEXT, error TEXT
 );
+CREATE TABLE IF NOT EXISTS scan_meta (
+    id                  INTEGER PRIMARY KEY CHECK (id = 1),
+    last_scan_started   TEXT,
+    last_scan_completed TEXT,
+    last_scan_status    TEXT,
+    last_scan_count     INTEGER,
+    schema_version      INTEGER
+);
 """
 
 INDEXES = [
@@ -59,6 +67,10 @@ def init_schema(db_path=None):
         conn.execute(SCHEMA)
         for stmt in INDEXES:
             conn.execute(stmt)
+        # [LOT v20-7a] Seed idempotent de la ligne unique scan_meta -- ne
+        # s'insere que si absente, n'ecrase jamais un etat deja present
+        # (schema_version/last_scan_* survivent aux appels repetes).
+        conn.execute("INSERT OR IGNORE INTO scan_meta (id, schema_version) VALUES (1, 1)")
         conn.commit()
     finally:
         conn.close()
