@@ -64,7 +64,7 @@ def connect(db_path=None):
 def init_schema(db_path=None):
     conn = connect(db_path)
     try:
-        conn.execute(SCHEMA)
+        conn.executescript(SCHEMA)
         for stmt in INDEXES:
             conn.execute(stmt)
         # [LOT v20-7a] Seed idempotent de la ligne unique scan_meta -- ne
