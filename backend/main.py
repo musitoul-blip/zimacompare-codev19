@@ -1134,6 +1134,18 @@ def api_selfcheck():
     return run_selfcheck()
 
 
+@app.get("/api/sqlite-health")
+def api_sqlite_health():
+    """LOT v20-7 B - diagnostic profond de master_scan.db (schema, index,
+    integrite, contenu, scan_meta, coherence CSV fige). Complement de
+    /api/selfcheck qui ne verifie que la presence du fichier."""
+    import sys
+    if "/app/tagaudit" not in sys.path:
+        sys.path.insert(0, "/app/tagaudit")
+    from core.db_health import db_health_check
+    return db_health_check()
+
+
 # ── F4 — Playlist .m3u8 des albums à réparer (EZ CD) ─────────────────────
 @app.get("/api/playlist/repair-preview")
 def api_playlist_repair_preview(pc_root: str = Query(""),
