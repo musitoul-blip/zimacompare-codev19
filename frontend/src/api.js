@@ -99,6 +99,7 @@ export const api = {
   // NEW v3.8
   smartDevices:      ()             => req('GET',    '/smart/devices'),
   selfcheck:         ()             => req('GET',    '/selfcheck'),
+  sqliteHealth:      ()             => req('GET',    '/sqlite-health'),
   selftest:          ()             => req('GET',    '/selftest'),
   smartRefresh:      ()             => req('POST',   '/smart/refresh'),
   cleanScan:         (body)         => req('POST',   '/clean/scan', body),

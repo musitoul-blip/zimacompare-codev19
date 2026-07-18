@@ -9,6 +9,7 @@ import TabSystem   from './components/TabSystem.jsx'
 import TabInfo     from './components/TabInfo.jsx'
 import TabZimatag from './components/TabZimatag.jsx'
 import TabVerification from './components/TabVerification.jsx'
+import TabAuditBdd from './components/TabAuditBdd.jsx'
 import TabAuditRegistry from './components/TabAuditRegistry.jsx'  // T10 Lot F4
 import TabLogs from './components/TabLogs.jsx'  // A2
 import TabTests from './components/TabTests.jsx'  // A3
@@ -106,6 +107,7 @@ export default function App() {
           { id:'logs',    label:'📜 Logs' },
           { id:'tests',   label:'🧪 Tests' },
           { id:'verif',   label:'✅ Verification' },
+          { id:'auditbdd', label:'🗄️ Audit base de données' },
         ].map(t => (
           <button key={t.id} onClick={() => setTab(t.id)} style={{
             background:'none', border:'none', color: tab===t.id ? 'var(--accent)' : 'var(--muted)',
@@ -132,6 +134,7 @@ export default function App() {
         {tab === 'logs'    && <TabLogs />}
         {tab === 'tests'   && <TabTests />}
         {tab === 'verif'   && <TabVerification />}
+        {tab === 'auditbdd' && <TabAuditBdd />}
       </main>
     </div>
   )
