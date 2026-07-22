@@ -80,6 +80,21 @@ AUDIO_EXTENSIONS = {
     ".ogg", ".opus", ".wav", ".aiff", ".aif", ".wma",
 }
 
+# [FIX placeholder BluOS] md5 de reference des icones generiques servies par
+# le NODE, prouves sur le chemin exact du scanner (/Browse -> attribut image
+# -> fetch_image avec &followRedirects=1). Reconnaissance directe par md5,
+# remplace le clustering par repetition (prouve inoperant : faux negatifs
+# sous placeholder_min_count, faux positifs sur pochettes partagees
+# legitimement par une serie/un coffret).
+KNOWN_PLACEHOLDERS = {
+    "f64b682d3118d2acc2386fd1267e44e0":
+        "Pochette refusee par BluOS (trop lourde) : le lecteur affiche "
+        "'Artwork Too Large'. Recompressez la pochette source.",
+    "20d2db425a44ccfd985fe13ca3bbf87a":
+        "Aucune pochette dans les fichiers de cet album : BluOS affiche "
+        "son icone par defaut. Ajoutez une pochette aux fichiers source.",
+}
+
 
 # ----------------------------------------------------------------------------
 # Helpers : chargement des paramètres éditables depuis bluos_config
@@ -289,8 +304,19 @@ def analyze_network_artwork(client, albums, params, log=_default_log, stop_event
                 else:
                     size = len(data)
                     entry["size"] = size
-                    if size < placeholder_max_bytes:
-                        h = hashlib.md5(data).hexdigest()
+                    # [FIX placeholder] md5 calcule inconditionnellement, HORS
+                    # du test de taille -- la reconnaissance par md5 de
+                    # reference ne doit jamais dependre de placeholder_max_kb
+                    # (modifiable en base ; s'il descendait sous ~15 Ko la
+                    # detection sauterait en silence si le hash restait
+                    # conditionne par ce seuil).
+                    h = hashlib.md5(data).hexdigest()
+                    if h in KNOWN_PLACEHOLDERS:
+                        entry["status"] = "placeholder"
+                        entry["detail"] = KNOWN_PLACEHOLDERS[h]
+                        entry["thumb"] = "data:" + (ctype or "image/jpeg") + ";base64," + \
+                            base64.b64encode(data).decode("ascii")
+                    elif size < placeholder_max_bytes:
                         cluster = small_clusters.setdefault(h, {
                             "count": 0, "size": size, "data": data, "ctype": ctype, "idxs": []
                         })
@@ -301,25 +327,20 @@ def analyze_network_artwork(client, albums, params, log=_default_log, stop_event
                 entry["detail"] = f"Erreur réseau : {e}"
         results.append(entry)
 
-    flagged_thumb_count = 0
+    # [FIX placeholder] le clustering ne pose plus aucun statut/detail/thumb --
+    # prouve inoperant (faux negatifs si repetition < placeholder_min_count,
+    # faux positifs sur pochettes partagees legitimement par une serie/un
+    # coffret). Conserve uniquement en LOG de decouvrabilite : signale les md5
+    # partages par au moins 2 albums et absents de KNOWN_PLACEHOLDERS, pour
+    # reperer un eventuel futur placeholder BluOS non encore recense.
     for h, cluster in small_clusters.items():
-        if cluster["count"] >= placeholder_min_count:
-            thumb_uri = "data:" + (cluster["ctype"] or "image/jpeg") + ";base64," + \
-                base64.b64encode(cluster["data"]).decode("ascii")
-            flagged_thumb_count += 1
-            for i in cluster["idxs"]:
-                results[i]["status"] = "placeholder"
-                results[i]["thumb"] = thumb_uri
-                results[i]["detail"] = (
-                    f"Image de {cluster['size'] / 1024:.0f} Ko, identique à "
-                    f"{cluster['count'] - 1} autres albums : taille et répétition "
-                    f"typiques de l'icône générique BluOS. Vérifiez la miniature "
-                    f"ci-contre — si c'est une vraie pochette (coffret/série), "
-                    f"ignorez cette ligne."
-                )
+        if cluster["count"] >= 2:
+            log(f"[BLUOS] md5 {h} partage par {cluster['count']} albums "
+                f"({cluster['size'] / 1024:.0f} Ko) - si placeholder inconnu, "
+                f"ajouter a KNOWN_PLACEHOLDERS")
 
-    log(f"  ... {flagged_thumb_count} image(s) suspecte(s) identifiée(s) "
-        f"(petite taille + répétée).")
+    known_count = sum(1 for r in results if r["status"] == "placeholder")
+    log(f"  ... {known_count} pochette(s) placeholder reconnue(s) (md5 de reference).")
     return results
 
 
