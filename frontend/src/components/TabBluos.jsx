@@ -51,17 +51,17 @@ function ParamRow({ p, onSaved }) {
     catch (e) { setMsg('✗ ' + e.message) } finally { setBusy(false) }
   }
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 320px) 150px 36px auto 1fr', alignItems: 'center', gap: 8, padding: '4px 0' }}>
+    <>
       <span style={{ fontSize: 13 }}>{p.label}
         <span style={{ color: 'var(--muted)', fontSize: 11 }}> ({p.param_key})</span>
       </span>
       <input value={val} onChange={e => setVal(e.target.value)}
-             style={{ width: '100%', fontSize: 13 }} />
+             style={{ fontSize: 13 }} />
       <span style={{ color: 'var(--muted)', fontSize: 12 }}>{p.unit}</span>
       <button className="btn-primary" disabled={!dirty || busy} onClick={save}
               style={{ fontSize: 12, padding: '2px 8px' }}>{busy ? '...' : 'Enregistrer'}</button>
-      {msg && <span style={{ fontSize: 12, color: msg[0] === '✓' ? 'var(--success)' : 'var(--danger)' }}>{msg}</span>}
-    </div>
+      <span style={{ fontSize: 12, color: msg[0] === '✓' ? 'var(--success)' : 'var(--danger)' }}>{msg}</span>
+    </>
   )
 }
 
@@ -288,7 +288,9 @@ export default function TabBluos({ status }) {
         <h3 style={{ fontSize: 15, marginTop: 0 }}>Parametres</h3>
         {loading && <div style={muted}>Chargement...</div>}
         {err && <div style={{ color: 'var(--danger)' }}>Erreur : {err}</div>}
-        {params.map(p => <ParamRow key={p.param_key} p={p} onSaved={onParamSaved} />)}
+        <div style={{ display: 'grid', gridTemplateColumns: 'auto 150px 36px auto 1fr', alignItems: 'center', columnGap: 8, rowGap: 6 }}>
+          {params.map(p => <ParamRow key={p.param_key} p={p} onSaved={onParamSaved} />)}
+        </div>
       </div>
 
       {/* --- Scan --- */}
