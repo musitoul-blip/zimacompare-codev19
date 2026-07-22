@@ -266,12 +266,11 @@ def analyze_network_artwork(client, albums, params, log=_default_log, stop_event
     """Télécharge la pochette de chaque album et repère celles qui posent
     vraiment problème (petite taille + répétée = icône générique BluOS).
 
-    params : dict issu de _load_params() (placeholder_max_bytes, placeholder_min_count).
+    params : dict issu de _load_params() (placeholder_max_bytes).
     stop_event : threading.Event optionnel pour interruption (Lot 3).
     progress_cb : callable(idx, total) optionnel pour publier la progression (Lot 3).
     """
     placeholder_max_bytes = params["placeholder_max_bytes"]
-    placeholder_min_count = params["placeholder_min_count"]
 
     results = []
     small_clusters = {}

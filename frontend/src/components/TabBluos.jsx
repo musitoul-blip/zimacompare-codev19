@@ -51,13 +51,13 @@ function ParamRow({ p, onSaved }) {
     catch (e) { setMsg('✗ ' + e.message) } finally { setBusy(false) }
   }
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0', flexWrap: 'wrap' }}>
-      <span style={{ minWidth: 260, fontSize: 13 }}>{p.label}
+    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 320px) 150px 36px auto 1fr', alignItems: 'center', gap: 8, padding: '4px 0' }}>
+      <span style={{ fontSize: 13 }}>{p.label}
         <span style={{ color: 'var(--muted)', fontSize: 11 }}> ({p.param_key})</span>
       </span>
       <input value={val} onChange={e => setVal(e.target.value)}
-             style={{ width: 140, fontSize: 13 }} />
-      <span style={{ color: 'var(--muted)', fontSize: 12, minWidth: 30 }}>{p.unit}</span>
+             style={{ width: '100%', fontSize: 13 }} />
+      <span style={{ color: 'var(--muted)', fontSize: 12 }}>{p.unit}</span>
       <button className="btn-primary" disabled={!dirty || busy} onClick={save}
               style={{ fontSize: 12, padding: '2px 8px' }}>{busy ? '...' : 'Enregistrer'}</button>
       {msg && <span style={{ fontSize: 12, color: msg[0] === '✓' ? 'var(--success)' : 'var(--danger)' }}>{msg}</span>}

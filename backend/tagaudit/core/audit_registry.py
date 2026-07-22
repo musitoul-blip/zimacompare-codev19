@@ -138,9 +138,15 @@ _SEED_BLUOS = [
     ("external_autoresize_min_kb", "600", "Pochette externe : redim. auto au-delà", "Ko"),
     ("external_autoresize_max_kb", "4096", "Pochette externe : taille max acceptée", "Ko"),
     ("external_no_optimize_max_px", "1200", "Pochette externe : dimension max si optim. off", "px"),
-    ("placeholder_max_kb", "50", "Placeholder : taille max (icône générique)", "Ko"),
-    ("placeholder_min_count", "4", "Placeholder : nb min d'albums pour détecter", "albums"),
 ]
+
+# Parametres devenus obsoletes (fix placeholder par md5, 2026-07-22).
+# Masques de l'UI : ils ne pilotent plus rien de reglable.
+# placeholder_min_count : plus aucun consommateur.
+# placeholder_max_kb : ne gouverne plus que le log de decouvrabilite
+#   de bluos_scanner (lu via get_bluos_param, defaut 50).
+# Les lignes existantes restent en base, inertes -- aucun DELETE.
+_DEPRECATED_BLUOS = {"placeholder_min_count", "placeholder_max_kb"}
 _SEED_INFO = {
     "cover_size", "quality_analysis", "albumartist_vs_artist", "duplicates_artist_title",
     "bitrate_mixed_album", "id3_version_inconsistency", "albumartist_typo",
@@ -345,12 +351,14 @@ def get_bluos_param(key, default=None, db_path=None):
         conn.close()
 
 def get_all_bluos_params(db_path=None):
-    """Liste tous les paramètres BluOS (dicts) pour l'UI."""
+    """Liste tous les parametres BluOS (dicts) pour l'UI. Filtre les cles
+    devenues obsoletes (_DEPRECATED_BLUOS) -- restent en base, inertes,
+    mais masquees de l'UI (aucun DELETE)."""
     conn = connect(db_path)
     try:
         conn.execute("CREATE TABLE IF NOT EXISTS bluos_config (param_key TEXT PRIMARY KEY, value TEXT, label TEXT, unit TEXT, updated_at TEXT)")
         rows = conn.execute("SELECT param_key, value, label, unit, updated_at FROM bluos_config ORDER BY param_key").fetchall()
-        return [dict(r) for r in rows]
+        return [dict(r) for r in rows if r["param_key"] not in _DEPRECATED_BLUOS]
     finally:
         conn.close()
 
