@@ -103,11 +103,12 @@ def _exts_from(formats):
     return out or None
 
 
-def _run(scan_paths, exts, limit):
+def _run(scan_paths, exts, limit, is_partial, scope):
     global _scanner
     try:
         from engine.scanner import BackgroundScanner
-        sc = BackgroundScanner(scan_paths, formats=exts, file_limit=limit)
+        sc = BackgroundScanner(scan_paths, formats=exts, file_limit=limit,
+                                is_partial=is_partial, scope=scope)
         with _lock:
             _scanner = sc
         sc.start()
@@ -142,13 +143,24 @@ def start_tag_scan(source=None, formats=None, name_filter=None, limit=None):
             lim = None
     except (TypeError, ValueError):
         lim = None
+    # [LOT marqueur base incomplete] is_partial/scope -- les 3 sources de
+    # partialite (dossiers filtres, formats restreints, limite de fichiers).
+    is_partial = bool(nf) or exts is not None or lim is not None
+    parties = []
+    if nf:
+        parties.append('dossiers "%s"' % nf)
+    if exts:
+        parties.append('formats %s' % ','.join(sorted(exts)))
+    if lim:
+        parties.append('limite %d fichiers' % lim)
+    scope = ' + '.join(parties) if is_partial else 'complet'
     _meta["started_at"] = time.time()
     _meta["ended_at"] = 0.0
     update_state(app_state=AppState.SCANNING, method="tagscan", source=source,
                  target="", error="", scan_done=False, progress=0, processed=0,
                  total=0, current_file="Pre-scan...", fps=0, eta_seconds=0,
                  new_count=0, different_count=0, deleted_count=0, identical_count=0)
-    threading.Thread(target=_run, args=(scan_paths, exts, lim), daemon=True).start()
+    threading.Thread(target=_run, args=(scan_paths, exts, lim, is_partial, scope), daemon=True).start()
     return True
 
 

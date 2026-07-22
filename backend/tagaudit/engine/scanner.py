@@ -44,10 +44,13 @@ class BackgroundScanner:
     # la perception de progression côté UI (qui rafraîchit elle-même à ~1 s).
     STATE_UPDATE_INTERVAL: float = 0.5
     
-    def __init__(self, scan_paths: List[Path], formats: List[str] = None, file_limit: int = None):
+    def __init__(self, scan_paths: List[Path], formats: List[str] = None, file_limit: int = None,
+                 is_partial: bool = False, scope: str = ''):
         self.scan_paths = scan_paths
         self.formats = set(formats) if formats else config.AUDIO_EXTENSIONS
         self.file_limit = file_limit
+        self.is_partial = is_partial
+        self.scope = scope
         self.extractor = SmartExtractor()
         self._stop_event = threading.Event()
         self._buffer: deque = deque(maxlen=config.BATCH_SIZE)
@@ -247,10 +250,12 @@ class BackgroundScanner:
                 count = self._db_conn.execute("SELECT COUNT(*) FROM tracks").fetchone()[0]
                 self._db_conn.execute(
                     "UPDATE scan_meta SET last_scan_status=?, last_scan_completed=?, "
-                    "last_scan_count=? WHERE id=1",
-                    (final_status, datetime.now().isoformat(), count)
+                    "last_scan_count=?, last_scan_partial=?, last_scan_scope=? WHERE id=1",
+                    (final_status, datetime.now().isoformat(), count,
+                     int(self.is_partial), self.scope)
                 )
                 self._db_conn.commit()
+                db.invalidate_scan_meta_cache()
             except Exception as e:
                 logger.error(f"[SQLITE] Erreur ecriture scan_meta (fin): {e}")
 

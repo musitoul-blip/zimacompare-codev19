@@ -39,7 +39,9 @@ CREATE TABLE IF NOT EXISTS scan_meta (
     last_scan_completed TEXT,
     last_scan_status    TEXT,
     last_scan_count     INTEGER,
-    schema_version      INTEGER
+    schema_version      INTEGER,
+    last_scan_partial   INTEGER DEFAULT 0,
+    last_scan_scope     TEXT DEFAULT ''
 );
 """
 
@@ -67,6 +69,16 @@ def init_schema(db_path=None):
         conn.executescript(SCHEMA)
         for stmt in INDEXES:
             conn.execute(stmt)
+        # [LOT marqueur base incomplete] migration douce -- meme motif que
+        # audit_registry.py::_migrate() (ALTER TABLE si colonne absente).
+        # Necessaire en plus du CREATE TABLE IF NOT EXISTS ci-dessus : celui-ci
+        # ne migre pas une table scan_meta deja existante sur une base
+        # deployee avant ce lot.
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(scan_meta)").fetchall()]
+        if 'last_scan_partial' not in cols:
+            conn.execute("ALTER TABLE scan_meta ADD COLUMN last_scan_partial INTEGER DEFAULT 0")
+        if 'last_scan_scope' not in cols:
+            conn.execute("ALTER TABLE scan_meta ADD COLUMN last_scan_scope TEXT DEFAULT ''")
         # [LOT v20-7a] Seed idempotent de la ligne unique scan_meta -- ne
         # s'insere que si absente, n'ecrase jamais un etat deja present
         # (schema_version/last_scan_* survivent aux appels repetes).
@@ -74,3 +86,37 @@ def init_schema(db_path=None):
         conn.commit()
     finally:
         conn.close()
+
+
+_scan_meta_cache = None
+
+
+def get_scan_meta_cached(db_path=None):
+    """Lit scan_meta une fois, garde le resultat en cache module. Renvoie
+    None si la lecture echoue -- le front n'affiche rien plutot que de
+    fausses alertes."""
+    global _scan_meta_cache
+    if _scan_meta_cache is not None:
+        return _scan_meta_cache
+    try:
+        conn = connect(db_path)
+        try:
+            row = conn.execute(
+                "SELECT last_scan_status, last_scan_completed, last_scan_count, "
+                "last_scan_partial, last_scan_scope FROM scan_meta WHERE id=1"
+            ).fetchone()
+        finally:
+            conn.close()
+        if row is None:
+            return None
+        _scan_meta_cache = dict(row)
+        return _scan_meta_cache
+    except Exception:
+        return None
+
+
+def invalidate_scan_meta_cache():
+    """Remet le cache scan_meta a None -- a appeler apres toute ecriture de
+    scan_meta (fin de scan)."""
+    global _scan_meta_cache
+    _scan_meta_cache = None

@@ -105,6 +105,14 @@ def _paths_overlap(source, target):
 def api_status():
     state = get_state()
     state["setup_needed"] = setup_needed()
+    try:
+        import sys
+        if "/app/tagaudit" not in sys.path:
+            sys.path.insert(0, "/app/tagaudit")
+        from core import db as _db
+        state["scan_meta"] = _db.get_scan_meta_cached()
+    except Exception:
+        state["scan_meta"] = None
     return state
 
 @app.get("/api/discover")
