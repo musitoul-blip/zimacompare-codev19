@@ -105,6 +105,7 @@ class MutagenProvider(BaseProvider):
             result['duration'] = self.format_duration(audio.info.length)
             result['samplerate'] = str(audio.info.sample_rate)
             result['channels'] = str(audio.info.channels)
+            result['bitrate'] = str(audio.info.bitrate // 1000)
             if hasattr(audio.info, 'bits_per_sample'):
                 result['bits_per_sample'] = str(audio.info.bits_per_sample)
                 result['bitdepth'] = str(audio.info.bits_per_sample)
