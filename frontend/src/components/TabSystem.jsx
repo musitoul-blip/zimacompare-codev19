@@ -3,6 +3,7 @@ import { api, openWsLogs, fmtSize, fmtDateDistance, copyToClipboard, downloadJso
 import SmartPanel from './SmartPanel.jsx'
 import IgnorePanel from './IgnorePanel.jsx'  // v3.12
 import pkg from '../../package.json'
+import lock from '../../package-lock.json'
 
 
 function LogConsole() {
@@ -215,9 +216,11 @@ function DepsTablePython() {
 function DepsTableNpm() {
   const initial = []
   for (const [name, version] of Object.entries(pkg.dependencies || {}))
-    initial.push({ name, installed: version, kind: 'prod' })
+    initial.push({ name, declared: version,
+      installed: lock.packages?.['node_modules/' + name]?.version || cleanVer(version), kind: 'prod' })
   for (const [name, version] of Object.entries(pkg.devDependencies || {}))
-    initial.push({ name, installed: version, kind: 'dev'  })
+    initial.push({ name, declared: version,
+      installed: lock.packages?.['node_modules/' + name]?.version || cleanVer(version), kind: 'dev'  })
   initial.sort((a, b) => a.kind !== b.kind ? (a.kind === 'prod' ? -1 : 1) : a.name.localeCompare(b.name))
 
   const [deps, setDeps] = useState(initial.map(d => ({
@@ -299,7 +302,7 @@ function DepsTableNpm() {
 
       <div style={{ overflowX:'auto' }}>
         <table style={{ minWidth:600 }}>
-          <thead><tr><th>Paquet</th><th>Type</th><th>Déclaré</th><th>Dernière version</th><th>Statut</th></tr></thead>
+          <thead><tr><th>Paquet</th><th>Type</th><th>Installée</th><th>Dernière version</th><th>Statut</th></tr></thead>
           <tbody>
             {deps.map(d => {
               const advs = audit?.advisories?.[d.name] || []
@@ -313,6 +316,7 @@ function DepsTableNpm() {
                   <td className="mono" style={{ color:'var(--muted)', verticalAlign:'top' }}>
                     {d.installed}
                     {d.installed_date && <div style={{ fontSize:10 }}>{d.installed_date}</div>}
+                    {d.declared && <div style={{ fontSize:10, color:'var(--muted)' }}>{d.declared}</div>}
                   </td>
                   <td className="mono" style={{ color:'var(--muted)', verticalAlign:'top' }}>
                     {d.latest ?? '—'}
