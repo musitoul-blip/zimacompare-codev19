@@ -89,7 +89,7 @@ export default function App() {
         ) : null}
       </header>
 
-      {status?.scan_meta && status.scan_meta.last_scan_completed && (status.scan_meta.last_scan_status !== 'completed' || status.scan_meta.last_scan_partial) && (
+      {status?.scan_meta && status.scan_meta.last_scan_completed && (status.scan_meta.last_scan_status !== 'completed' || !!status.scan_meta.last_scan_partial) && (
         <div style={{
           padding:'8px 24px', background:'color-mix(in srgb, var(--warning) 16%, transparent)',
           borderBottom:'1px solid var(--border)', fontSize:13,
