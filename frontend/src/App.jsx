@@ -89,6 +89,23 @@ export default function App() {
         ) : null}
       </header>
 
+      {status?.scan_meta && status.scan_meta.last_scan_completed && (status.scan_meta.last_scan_status !== 'completed' || status.scan_meta.last_scan_partial) && (
+        <div style={{
+          padding:'8px 24px', background:'color-mix(in srgb, var(--warning) 16%, transparent)',
+          borderBottom:'1px solid var(--border)', fontSize:13,
+          display:'flex', alignItems:'center', justifyContent:'space-between', gap:16,
+        }}>
+          <span>
+            ⚠ {status.scan_meta.last_scan_status !== 'completed'
+              ? `Base incomplète — le dernier scan ne s'est pas terminé (statut : ${status.scan_meta.last_scan_status}). Les audits et exports portent sur une partie de la bibliothèque. Un scan complet est nécessaire.`
+              : `Base partielle — dernier scan limité à ${status.scan_meta.last_scan_scope}. Les audits et exports ne couvrent pas toute la bibliothèque.`}
+          </span>
+          <span style={{ fontSize:11, color:'var(--muted)', whiteSpace:'nowrap' }}>
+            {status.scan_meta.last_scan_count} pistes · {(status.scan_meta.last_scan_completed || '').slice(0,16).replace('T',' ')}
+          </span>
+        </div>
+      )}
+
       <nav style={{
         background:'var(--surface)', borderBottom:'1px solid var(--border)',
         display:'flex', padding:'0 24px', flexWrap:'wrap',
