@@ -16,6 +16,12 @@ from config import AppState, get_state, update_state
 
 TAG_SOURCE_DEFAULT = "/disks/HDD-Storage1/Media/GoogleMusic"
 
+# [FIX is_partial] Formats reellement supportes par le scan-tag.
+# Source unique : _exts_from() filtre dessus, et is_partial compare
+# dessus. NE PAS utiliser config.AUDIO_EXTENSIONS, qui contient en
+# plus '.mp4' que _exts_from ne produit jamais.
+_FORMATS_SUPPORTES = ("mp3", "flac", "m4a")
+
 _scanner = None
 _lock = threading.Lock()
 _meta = {"started_at": 0.0, "ended_at": 0.0}
@@ -88,7 +94,7 @@ def dirs_payload(source=None, refresh=False):
           "flac": sum(d["flac"] for d in dirs),
           "m4a": sum(d["m4a"] for d in dirs)}
     return {"source": idx["source"], "count": len(dirs),
-            "total_files": by["mp3"] + by["flac"] + by["m4a"],
+            "total_files": by["mp3"] + by["flac"] + by["m4a"],  # garder aligne sur _FORMATS_SUPPORTES
             "by_format": by, "built_at": idx["built_at"], "dirs": dirs}
 
 
@@ -98,7 +104,7 @@ def _exts_from(formats):
     out = set()
     for f in formats:
         f = str(f).lower().lstrip(".")
-        if f in ("mp3", "flac", "m4a"):
+        if f in _FORMATS_SUPPORTES:
             out.add("." + f)
     return out or None
 
@@ -145,7 +151,9 @@ def start_tag_scan(source=None, formats=None, name_filter=None, limit=None):
         lim = None
     # [LOT marqueur base incomplete] is_partial/scope -- les 3 sources de
     # partialite (dossiers filtres, formats restreints, limite de fichiers).
-    is_partial = bool(nf) or exts is not None or lim is not None
+    _tous = {"." + f for f in _FORMATS_SUPPORTES}
+    restreint = exts is not None and set(exts) != _tous
+    is_partial = bool(nf) or restreint or lim is not None
     parties = []
     if nf:
         parties.append('dossiers "%s"' % nf)
